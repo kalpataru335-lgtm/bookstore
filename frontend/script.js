@@ -9,7 +9,6 @@ localStorage.setItem("bundleApplied", "false");
 
 // ===== LOAD BOOKS =====
 async function loadBooks() {
-  // FEEDBACK FOR RENDER SLEEP (UX)
   const container = document.getElementById("books");
   if (container.innerHTML === "") {
     container.innerHTML = "<div style='text-align:center; padding:20px;'>⏳ Loading fresh inventory...</div>";
@@ -26,8 +25,6 @@ async function loadBooks() {
     const data = await res.json();
     booksData = data;
     
-    console.log("REFRESHED DATA", new Date().toLocaleTimeString());
-
     // ===== REMOVE UNAVAILABLE ITEMS FROM SELECTION =====
     selected = selected.filter(id => {
       const b = data.find(x => x.id === id);
@@ -36,7 +33,6 @@ async function loadBooks() {
 
     localStorage.setItem("selectedBooks", JSON.stringify(selected));
 
-    // FORCE CLEAN RE-RENDER
     container.innerHTML = "";
     renderBooks(data);
 
@@ -56,7 +52,6 @@ function renderBooks(books) {
     const card = document.createElement("div");
     card.className = "card";
 
-    // ===== HIGHLIGHT SPECIAL ITEMS =====
     let highlight = "";
     if (b.name.toLowerCase().includes("lilamrit")) {
       highlight = `<div class="highlight">7 Vol Set • Sealed (Vol 1 open)</div>`;
@@ -64,7 +59,7 @@ function renderBooks(books) {
 
     const mrp = b.price * 4;
 
-    // ===== LOCKED / SOLD STATUS =====
+    // LOCKED / SOLD STATUS
     if (b.status !== "available") {
       card.classList.add("locked");
       card.innerHTML = `
@@ -77,7 +72,7 @@ function renderBooks(books) {
         </small>
       `;
     }
-    // ===== AVAILABLE STATUS =====
+    // AVAILABLE STATUS
     else {
       card.innerHTML = `
         ${highlight}
@@ -104,10 +99,8 @@ function toggleSelection(id) {
     selected.push(id);
   }
 
-  // RESET BUNDLE ON MANUAL CHANGE
   bundleApplied = false;
   localStorage.setItem("bundleApplied", "false");
-
   localStorage.setItem("selectedBooks", JSON.stringify(selected));
   renderBooks(booksData);
 }
@@ -125,7 +118,6 @@ function updateTotal() {
   total = rawTotal;
   const availableCount = booksData.filter(b => b.status === "available").length;
   
-  // BUNDLE CALCULATION
   const isBundle = selected.length === availableCount && availableCount > 0;
 
   if (isBundle) {
@@ -169,5 +161,4 @@ setInterval(async () => {
   await loadBooks();
 }, 5000);
 
-// INITIAL LOAD
 loadBooks();

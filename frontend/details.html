@@ -108,7 +108,7 @@ Calculate Shipping
 let selected = JSON.parse(localStorage.getItem("selectedBooks")) || [];
 let books = [];
 
-// 🔥 RESET SHIPPING EVERY VISIT (PREVENT STALE DATA)
+// 🔥 RESET SHIPPING EVERY VISIT
 localStorage.removeItem("shippingCost");
 let shippingCost = 0;
 let calculated = false;
@@ -116,12 +116,10 @@ let calculated = false;
 // ===== LOAD INITIAL DATA =====
 async function load(){
   try{
-    // 🔥 NO-CACHE FETCH FOR LIVE AVAILABILITY
     const res = await fetch("https://bookstore-backend-971c.onrender.com/books", { cache: "no-store" });
     books = await res.json();
 
     let weight = 0;
-
     selected.forEach(id=>{
       const b = books.find(x=>x.id === id);
       if(b) weight += b.weight;
@@ -129,7 +127,7 @@ async function load(){
 
     document.getElementById("weight").innerText = weight;
 
-    // PREFILL USER DATA
+    // PREFILL PREVIOUS DETAILS
     const user = JSON.parse(localStorage.getItem("userDetails"));
     if(user){
       document.getElementById("name").value = user.name || "";
@@ -138,19 +136,18 @@ async function load(){
       document.getElementById("pincode").value = user.pincode || "";
     }
     
-    enableBtn(); // Re-evaluate button for prefilled data
+    enableBtn(); 
 
   } catch(err){
-    // PRODUCTION ERROR UI
     document.getElementById("main-content").innerHTML =
       "<div style='text-align:center; padding-top:50px;'>" +
-      "❌ Failed to load books. <br><br>" +
+      "❌ Failed to connect to server. <br><br>" +
       "<button class='calc-btn' onclick='location.reload()'>Retry</button>" +
       "</div>";
   }
 }
 
-// ===== REALTIME VALIDATION & RESET PIN =====
+// REALTIME RESET ON PIN CHANGE
 document.getElementById("pincode").addEventListener("input", ()=>{
   calculated = false;
   shippingCost = 0;
@@ -163,8 +160,6 @@ document.getElementById("pincode").addEventListener("input", ()=>{
 document.getElementById("name").addEventListener("input", enableBtn);
 document.getElementById("phone").addEventListener("input", enableBtn);
 document.getElementById("address").addEventListener("input", enableBtn);
-
-// ===== UI HELPERS =====
 
 function enableBtn(){
   const name = document.getElementById("name");
@@ -195,8 +190,7 @@ function disableBtn(){
   btn.classList.remove("enabled");
 }
 
-// ===== SHIPPING LOGIC =====
-
+// SHIPPING CALCULATION LOGIC
 function getChargeableWeight(weight){
   let volume = weight * 900;
   let side = Math.cbrt(volume);
@@ -219,9 +213,8 @@ function calculateShipping(){
   const address = document.getElementById("address").value.trim();
   const pincode = document.getElementById("pincode").value.trim();
 
-  // STRICTOR VALIDATION BEFORE CALC
   if(name === "" || address === "" || !/^\d{10}$/.test(phone) || !/^\d{6}$/.test(pincode)){
-    alert("Fill all details correctly before calculating shipping");
+    alert("Please fill all details correctly first.");
     return;
   }
 
@@ -246,7 +239,7 @@ function calculateShipping(){
   enableBtn();
 }
 
-// ===== NAVIGATION =====
+// FINAL AVAILABILITY CHECK BEFORE NEXT PAGE
 async function goNext(){
   if(!calculated){ alert("Calculate shipping first"); return; }
   
@@ -257,12 +250,8 @@ async function goNext(){
     pincode: document.getElementById("pincode").value.trim() 
   };
 
-  if(!user.name || !user.phone || !user.address || !user.pincode){ alert("Fill all details"); return; }
-
   localStorage.setItem("userDetails", JSON.stringify(user));
-  localStorage.setItem("shippingCost", shippingCost);
 
-  // 🔥 CHECK AVAILABILITY ONE LAST TIME BEFORE SUMMARY
   try {
     const res = await fetch("https://bookstore-backend-971c.onrender.com/books", { cache: "no-store" });
     const latest = await res.json();
@@ -280,7 +269,7 @@ async function goNext(){
     localStorage.setItem("selectedBooks", JSON.stringify(selected));
 
     if(removed.length > 0){
-      alert("Some books became unavailable:\n" + removed.join("\n"));
+      alert("Some books became unavailable while you were typing:\n" + removed.join("\n"));
       window.location.href = "index.html";
       return;
     }
@@ -288,12 +277,10 @@ async function goNext(){
     window.location.href = "summary.html";
     
   } catch(err) {
-    alert("Network error. Please check your connection and try again.");
+    alert("Network error. Check your internet connection.");
   }
 }
 
-// ===== INIT =====
-document.getElementById("continueBtn").disabled = true;
 load();
 
 </script>
