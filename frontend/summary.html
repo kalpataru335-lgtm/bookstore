@@ -3,162 +3,198 @@
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Order Summary</title>
-
 <link rel="stylesheet" href="style.css">
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 
 <style>
-.container{ max-width:600px; margin:auto; padding:16px; }
-.box{ background:#1e293b; padding:16px; border-radius:14px; margin-bottom:12px; }
-.line{ display:flex; justify-content:space-between; margin:10px 0; }
-.strike{ text-decoration:line-through; color:#9ca3af; }
-.bundle{ background:rgba(34,197,94,0.15); padding:6px 10px; border-radius:8px; color:#22c55e; transition: opacity 0.2s; }
-.shipping{ color:#3b82f6; }
-.final{ color:#22c55e; font-size:20px; font-weight:bold; }
-.bottom-bar{ position:fixed; bottom:0; width:100%; background:black; padding:12px; }
-button{ width:100%; padding:14px; margin-top:8px; border:none; border-radius:10px; font-size:16px; }
-.pay{ background:#22c55e; transition: opacity 0.2s; }
-.modify{ background:#64748b; }
+  .container { max-width: 600px; margin: auto; padding: 16px; }
+  .box { background: #1e293b; padding: 16px; border-radius: 14px; margin-bottom: 12px; }
+  .line { display: flex; justify-content: space-between; margin: 10px 0; }
+  .final-line { color: #22c55e; font-size: 20px; font-weight: bold; }
+  
+  /* Layout Patch: Ensuring breathing room above the fixed bottom bar */
+  .terms-card {
+    margin: 30px auto 180px auto;
+    max-width: 600px;
+    background: #111827;
+    padding: 20px;
+    border-radius: 12px;
+    border: 1px solid #1f2937;
+  }
 </style>
-
 </head>
 
 <body>
 
-<h2 style="text-align:center;">🧾 Order Summary</h2>
+<h2 style="text-align:center; margin: 20px 0;">🧾 Order Summary</h2>
 
 <div class="container">
+  <div id="list" class="box"></div>
 
-<div id="list" class="box"></div>
+  <div id="unavailableBox" class="box" style="display:none; border:1px solid #ef4444;">
+    <b style="color: #ef4444;">❌ These books are unavailable:</b>
+    <div id="unavailableList"></div>
+  </div>
 
-<div id="unavailableBox" class="box" style="display:none; border:1px solid #ef4444;">
-  <b style="color: #ef4444;">❌ These books are unavailable:</b>
-  <div id="unavailableList"></div>
-</div>
+  <div class="box">
+    <div class="line"><span>Books Total</span><span>₹<span id="total"></span></span></div>
+    <div class="line"><span>Market Price</span><span class="strike">₹<span id="mrp"></span></span></div>
+    <div class="line" style="background:rgba(34,197,94,0.15); padding:6px 10px; border-radius:8px; color:#22c55e;">
+      <span>Bundle Discount</span><span>-₹<span id="bundle"></span></span>
+    </div>
+    <div class="line" style="color:#facc15;"><span>You Save</span><span>₹<span id="save"></span></span></div>
+    <div class="line" style="color:#3b82f6;"><span>Shipping</span><span>₹<span id="shipping"></span></span></div>
+    <div class="line final-line">
+      <span>Final Payable</span><span>₹<span id="final"></span></span>
+    </div>
+  </div>
 
-<div class="box">
-<div class="line"><span>Books Total</span><span>₹<span id="total"></span></span></div>
-<div class="line"><span>Market Price</span><span class="strike">₹<span id="mrp"></span></span></div>
-<div class="line bundle"><span>Bundle Discount</span><span>-₹<span id="bundle"></span></span></div>
-<div class="line" style="color:#facc15;"><span>You Save</span><span>₹<span id="save"></span></span></div>
-<div class="line shipping"><span>Shipping</span><span>₹<span id="shipping"></span></span></div>
-<div class="line final"><span>Final Payable</span><span>₹<span id="final"></span></span></div>
-</div>
-
+  <div class="terms-card">
+    <label style="display: flex; align-items: flex-start; gap: 12px; cursor: pointer;">
+      <input type="checkbox" id="terms" style="width: 22px; height: 22px; margin-top: 4px; accent-color: #22c55e;">
+      <div style="font-size: 14px; line-height: 1.6; color: #e5e7eb;">
+        <b>I agree to the Terms & Conditions</b>
+        <ul style="margin-top: 8px; padding-left: 18px;">
+          <li>Payments are non-refundable</li>
+          <li>Books are non-returnable after payment</li>
+          <li>Books will be locked for 3 minutes after clicking Pay</li>
+        </ul>
+      </div>
+    </label>
+  </div>
 </div>
 
 <div class="bottom-bar">
-<div style="margin-top:20px; display:flex; align-items:flex-start; gap:10px; color:white; padding-bottom:10px;">
-  <input type="checkbox" id="terms" style="width:22px; height:22px; margin-top:6px; accent-color:#22c55e;">
-  <label for="terms" style="font-size:15px; line-height:1.6; color:#f1f5f9;">
-    I agree to the Terms & Conditions:
-    <br>
-    • Payments are non-refundable  
-    <br>
-    • Books are non-returnable after payment  
-    <br>
-    • Books will be locked for 3 minutes after clicking Pay
-  </label>
-</div>
-
-<button class="modify" onclick="modify()">Modify Order</button>
-<button id="payBtn" class="pay" onclick="pay()">Pay Now</button>
+  <button onclick="modify()" style="flex: 1; background: #64748b; color: white; border: none; padding: 14px; border-radius: 10px; font-size: 16px; cursor: pointer;">
+    Modify Order
+  </button>
+  <button id="payBtn" onclick="pay()" style="flex: 1.2; background: #22c55e; color: white; border: none; padding: 14px; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer;">
+    Pay Now
+  </button>
 </div>
 
 <script>
 let ids = JSON.parse(localStorage.getItem("selectedBooks")) || [];
 let shipping = parseInt(localStorage.getItem("shippingCost")) || 0;
 let books = [];
-let calculatedTotal = 0; 
+let calculatedTotal = 0;
 
-async function load(){
-  if(!localStorage.getItem("shippingCost")){ alert("Please calculate shipping before proceeding"); window.location.href = "details.html"; return; }
-  try{
+async function load() {
+  if(!localStorage.getItem("shippingCost")) { 
+    alert("Please calculate shipping before proceeding"); 
+    window.location.href = "details.html"; 
+    return; 
+  }
+  try {
     const res = await fetch("https://bookstore-backend-971c.onrender.com/books", { cache: "no-store" });
     books = await res.json();
     let total=0, mrp=0, html="", rawTotal=0, unavailable = [];
 
-    ids.forEach(id=>{
-      const b = books.find(x=>x.id === id);
-      if(b && b.status === "available"){ rawTotal += b.price; total += b.price; mrp += b.price * 4; html += `<div class="line"><span>${b.name}</span><span>₹${b.price}</span></div>`; }
-      else{ unavailable.push(b?.name || "Book"); }
+    // Filter available vs sold books
+    ids.forEach(id => {
+      const b = books.find(x => x.id === id);
+      if(b && b.status === "available") { 
+        rawTotal += b.price; total += b.price; mrp += b.price * 4; 
+        html += `<div class="line"><span>${b.name}</span><span>₹${b.price}</span></div>`; 
+      } else { 
+        unavailable.push(b?.name || "Book"); 
+      }
     });
 
-    ids = ids.filter(id=>{ const b = books.find(x=>x.id === id); return b && b.status === "available"; });
+    ids = ids.filter(id => { 
+      const b = books.find(x => x.id === id); 
+      return b && b.status === "available"; 
+    });
     localStorage.setItem("selectedBooks", JSON.stringify(ids));
 
-    if(ids.length === 0){ alert("All selected books are unavailable"); window.location.href = "index.html"; return; }
-    if(ids.length > 0 && rawTotal < 160){ alert("Order below ₹160. Please add more books."); setTimeout(()=>{ window.location.href = "index.html"; }, 500); return; }
+    if(ids.length === 0) { 
+      alert("All selected books are unavailable"); 
+      window.location.href = "index.html"; 
+      return; 
+    }
 
+    // Bundle Logic
     const availableCount = books.filter(b => b.status === "available").length;
     const isBundle = ids.length === availableCount && availableCount > 0;
     let bundleDiscount = isBundle ? 100 : 0;
     
     calculatedTotal = total + shipping - bundleDiscount;
 
+    // Update UI
     document.getElementById("list").innerHTML = html;
     document.getElementById("unavailableBox").style.display = unavailable.length > 0 ? "block" : "none";
     document.getElementById("unavailableList").innerHTML = unavailable.map(x => `<p>${x}</p>`).join("");
     document.getElementById("total").innerText = total;
     document.getElementById("mrp").innerText = mrp;
     document.getElementById("bundle").innerText = bundleDiscount;
-    document.querySelector(".bundle").style.opacity = isBundle ? "1" : "0.6";
     document.getElementById("save").innerText = mrp - (total - bundleDiscount);
     document.getElementById("shipping").innerText = shipping;
     document.getElementById("final").innerText = calculatedTotal;
-  }catch(err){ alert("Failed to load summary data."); }
+  } catch(err) { alert("Failed to load summary."); }
 }
 
-function modify(){ localStorage.setItem("bundleApplied","false"); localStorage.removeItem("shippingCost"); localStorage.removeItem("userDetails"); window.location = "index.html"; }
+function modify() { 
+  localStorage.setItem("bundleApplied","false"); 
+  localStorage.removeItem("shippingCost"); 
+  window.location = "index.html"; 
+}
 
-async function pay(){
+async function pay() {
   const payBtn = document.getElementById("payBtn");
 
-  // 🔥 PATCH: DOUBLE-CLICK GATE
-  if(window.paymentStarted){ return; }
+  // Prevent multiple clicks
+  if(window.paymentStarted) return;
   window.paymentStarted = true;
 
-  if(!ids || ids.length === 0){ alert("No books selected"); window.paymentStarted = false; return; }
-  if(!calculatedTotal || calculatedTotal <= 0){ alert("Invalid amount."); window.paymentStarted = false; return; }
-  if(typeof Razorpay === "undefined"){ alert("Payment system not loaded. Refresh."); window.paymentStarted = false; return; }
-  if(!document.getElementById("terms").checked){ alert("Please accept terms & conditions"); window.paymentStarted = false; return; }
+  if(!ids || ids.length === 0) { alert("No books selected"); window.paymentStarted = false; return; }
+  if(!document.getElementById("terms").checked) { alert("Please accept terms & conditions"); window.paymentStarted = false; return; }
 
   payBtn.disabled = true;
   payBtn.innerText = "Processing...";
 
   try {
-    // FRESH AVAILABILITY CHECK
-    const res = await fetch("https://bookstore-backend-971c.onrender.com/books", { cache: "no-store" });
-    const latest = await res.json();
+    // 1. Fresh inventory check
+    const checkRes = await fetch("https://bookstore-backend-971c.onrender.com/books", { cache: "no-store" });
+    const latest = await checkRes.json();
     let removed = [];
-    ids = ids.filter(id=>{ const b = latest.find(x=>x.id === id); if(!b || b.status !== "available"){ removed.push(b?.name || "Book"); return false; } return true; });
+    ids = ids.filter(id => { 
+      const b = latest.find(x => x.id === id); 
+      if(!b || b.status !== "available") { removed.push(b?.name || "Book"); return false; }
+      return true;
+    });
 
-    if(removed.length > 0){ alert("Books sold out:\n" + removed.join("\n")); window.paymentStarted = false; window.location.href = "index.html"; return; }
+    if(removed.length > 0) {
+      alert("Some books were sold: " + removed.join(", "));
+      window.paymentStarted = false;
+      window.location.href = "index.html";
+      return;
+    }
 
-    // LOCK INVENTORY
+    // 2. Lock Inventory
     const lockRes = await fetch("https://bookstore-backend-971c.onrender.com/lock-books", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids: ids })
     });
+    if(!lockRes.ok) throw new Error("Lock failed");
 
-    if(!lockRes.ok){ alert("Lock failed. Retry."); window.paymentStarted = false; window.location.reload(); return; }
-
-    // CREATE ORDER
-    const orderRes = await fetch("https://bookstore-backend-971c.onrender.com/create-order",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ amount: calculatedTotal }) });
-    const data = await orderRes.json();
-    if(!data.id){ alert("Order creation failed."); window.paymentStarted = false; payBtn.disabled = false; payBtn.innerText = "Pay Now"; return; }
+    // 3. Create Razorpay Order
+    const response = await fetch("https://bookstore-backend-971c.onrender.com/create-order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: calculatedTotal })
+    });
+    const data = await response.json();
 
     const rzp = new Razorpay({
-      key: "rzp_test_SguP9aeomm5pPh",
+      key: "rzp_test_SguP9aeomm5pPh", // Replace with Live Key for production
       amount: data.amount,
       currency: "INR",
       order_id: data.id,
       handler: async function (response) {
-        // 🔥 PATCH: CORRECT USER DATA RETRIEVAL
         const user = JSON.parse(localStorage.getItem("userDetails") || "{}");
-
         try {
+          // Final Confirmation (Server Marks Sold + Relays to Google Sheets)
           const confirmRes = await fetch("https://bookstore-backend-971c.onrender.com/confirm-order", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -172,54 +208,32 @@ async function pay(){
               pincode: user.pincode
             })
           });
-
-          // 🔥 PATCH: CHECK RESPONSE OK
-          if(!confirmRes.ok){ throw new Error("Order confirmation failed."); }
-
+          if(!confirmRes.ok) throw new Error("Confirmation failed");
           window.location.href = "thankyou.html";
-
         } catch (err) {
-          console.error("CONFIRM ERROR:", err);
-          alert("Payment successful but confirmation failed. Contact us with Payment ID: " + response.razorpay_payment_id);
+          alert("Payment done but record failed. Save Payment ID: " + response.razorpay_payment_id);
           window.paymentStarted = false;
         }
       },
-      modal:{
-        ondismiss: async function(){
+      modal: {
+        ondismiss: async function() {
           window.paymentStarted = false;
           payBtn.disabled = false; payBtn.innerText = "Pay Now";
-          await fetch("https://bookstore-backend-971c.onrender.com/unlock-books", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ ids: ids }) });
+          // Unlock books if payment cancelled
+          await fetch("https://bookstore-backend-971c.onrender.com/unlock-books", { 
+            method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ ids: ids }) 
+          });
         }
       }
     });
-
-    rzp.on('payment.failed', async function (response) {
-      alert("Payment failed.");
-      window.paymentStarted = false;
-      payBtn.disabled = false; payBtn.innerText = "Pay Now";
-      await fetch("https://bookstore-backend-971c.onrender.com/unlock-books", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ ids: ids }) });
-    });
-
     rzp.open();
-
   } catch(err) {
-      console.error("PAYMENT ERROR:", err);
-      alert("Something went wrong. Please refresh.");
-      window.paymentStarted = false;
-      payBtn.disabled = false; payBtn.innerText = "Pay Now";
+    alert("System error. Please refresh.");
+    window.paymentStarted = false;
+    payBtn.disabled = false; payBtn.innerText = "Pay Now";
   }
 }
-
-const payBtn = document.getElementById("payBtn"), terms = document.getElementById("terms");
-payBtn.disabled = true; payBtn.style.opacity = "0.5";
-terms.addEventListener("change", ()=>{
-  payBtn.disabled = !terms.checked;
-  payBtn.style.opacity = terms.checked ? "1" : "0.5";
-});
-
 load();
-
 </script>
-
 </body>
 </html>
