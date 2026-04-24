@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Order Successful</title>
+
+<link rel="stylesheet" href="style.css">
+
+<style>
+.container{
+  max-width:600px;
+  margin:auto;
+  padding:16px;
+}
+
+.success{
+  text-align:center;
+  font-size:22px;
+  margin-bottom:12px;
+}
+
+.box{
+  background:#1e293b;
+  padding:14px;
+  border-radius:12px;
+  margin-bottom:10px;
+}
+
+.line{
+  display:flex;
+  justify-content:space-between;
+  margin:6px 0;
+}
+
+button{
+  width:100%;
+  padding:14px;
+  border:none;
+  border-radius:10px;
+  margin-top:10px;
+  font-size:15px;
+  cursor:pointer;
+}
+
+.download{
+  background:#3b82f6;
+}
+
+.home{
+  background:#22c55e;
+}
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+<div class="success">🎉 Order Successful!</div>
+
+<div id="details" class="box"></div>
+
+<div class="box">
+  <div class="line">
+    <span>Total</span>
+    <span>₹<span id="total"></span></span>
+  </div>
+
+  <div class="line">
+    <span>Shipping</span>
+    <span>₹<span id="shipping"></span></span>
+  </div>
+
+  <div class="line" style="font-weight:bold;">
+    <span>Final Paid</span>
+    <span>₹<span id="final"></span></span>
+  </div>
+</div>
+
+<button class="download" onclick="downloadReceipt()">⬇ Download Receipt</button>
+<button class="home" onclick="goHome()">Back to Home</button>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<script>
+
+// ===== DATA =====
+let ids = JSON.parse(localStorage.getItem("selectedBooks")) || [];
+let user = JSON.parse(localStorage.getItem("userDetails")) || {};
+let shipping = parseInt(localStorage.getItem("shippingCost")) || 0;
+let bundle = localStorage.getItem("bundleApplied") === "true";
+
+let books = [];
+
+// ===== LOAD =====
+async function load(){
+
+  const res = await fetch("http://127.0.0.1:3000/books");
+  books = await res.json();
+
+  let total = 0;
+  let html = `
+    <b>Name:</b> ${user.name || ""}<br>
+    <b>Phone:</b> ${user.phone || ""}<br>
+    <b>Address:</b> ${user.address || ""}<br><br>
+    <b>Books:</b><br>
+  `;
+
+  ids.forEach(id=>{
+    const b = books.find(x=>x.id === id);
+    if(b){
+      total += b.price;
+      html += `• ${b.name} — ₹${b.price}<br>`;
+    }
+  });
+
+  // APPLY BUNDLE
+  if(bundle){
+    total -= 100;
+  }
+
+  let final = total + shipping;
+
+  document.getElementById("details").innerHTML = html;
+  document.getElementById("total").innerText = total;
+  document.getElementById("shipping").innerText = shipping;
+  document.getElementById("final").innerText = final;
+}
+
+// ===== PDF DOWNLOAD =====
+function downloadReceipt(){
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+
+  let y = 10;
+
+  doc.text("Order Receipt", 10, y); y+=10;
+
+  doc.text(`Name: ${user.name}`, 10, y); y+=8;
+  doc.text(`Phone: ${user.phone}`, 10, y); y+=8;
+  doc.text(`Address: ${user.address}`, 10, y); y+=10;
+
+  doc.text("Books:", 10, y); y+=8;
+
+  ids.forEach(id=>{
+    const b = books.find(x=>x.id === id);
+    if(b){
+      doc.text(`${b.name} - ₹${b.price}`, 10, y);
+      y+=6;
+    }
+  });
+
+  let total = parseInt(document.getElementById("total").innerText);
+  let final = parseInt(document.getElementById("final").innerText);
+
+  y+=6;
+  doc.text(`Shipping: ₹${shipping}`, 10, y); y+=8;
+  doc.text(`Total: ₹${total}`, 10, y); y+=8;
+  doc.text(`Final Paid: ₹${final}`, 10, y);
+
+  doc.save("receipt.pdf");
+}
+
+// ===== HOME =====
+function goHome(){
+  localStorage.clear();
+  window.location.href = "index.html";
+}
+
+// ===== INIT =====
+load();
+
+</script>
+
+</body>
+</html>

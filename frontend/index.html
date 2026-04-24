@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SP Books Sale</title>
+<link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+<div class="header">
+  <h1>🔥 Loot SP Books at 76% Off</h1>
+  <p>
+    Hi, I'm Sourav. Selling my Prabhupada books in almost new condition.
+    Not a commercial seller — just looking for genuine buyers.
+  </p>
+</div>
+
+<div class="action-buttons">
+
+  <a href="https://wa.me/919777745839" target="_blank" class="btn whatsapp">
+    📞 Contact on WhatsApp
+  </a>
+
+  <button class="btn bundle" onclick="applyBundle()">
+    🎁 Buy All & Get ₹100 OFF
+  </button>
+
+  <button class="btn images" onclick="viewImages()">
+    👁 View Real Book Pictures
+  </button>
+
+</div>
+
+<div id="books"></div>
+
+<div class="bottom-bar">
+  <div class="left-box">
+    <div class="price">₹<span id="total">0</span></div>
+    <div id="msg">Minimum ₹160 required</div>
+    <small>Excluding shipping</small>
+  </div>
+
+  <button class="continue-btn" onclick="goNext()">Continue →</button>
+</div>
+
+<script src="script.js"></script>
+
+<script>
+function applyBundle(){
+  selected = booksData.filter(b=>b.status==="available").map(b=>b.id);
+  localStorage.setItem("selectedBooks", JSON.stringify(selected));
+  localStorage.setItem("bundleApplied","true");
+  window.location="details.html";
+}
+
+function viewImages(){
+  window.open("https://drive.google.com/drive/folders/1QtImhvbA8sS7K45tDz7SUojIqrtCZhS7","_blank");
+}
+</script>
+
+</body>
+</html>

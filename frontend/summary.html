@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Order Summary</title>
+
+<link rel="stylesheet" href="style.css">
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
+<style>
+.container{
+  max-width:600px;
+  margin:auto;
+  padding:16px;
+}
+.box{
+  background:#1e293b;
+  padding:16px;
+  border-radius:14px;
+  margin-bottom:12px;
+}
+.line{
+  display:flex;
+  justify-content:space-between;
+  margin:10px 0;
+}
+.strike{
+  text-decoration:line-through;
+  color:#9ca3af;
+}
+.bundle{
+  background:rgba(34,197,94,0.15);
+  padding:6px 10px;
+  border-radius:8px;
+  color:#22c55e;
+}
+.shipping{
+  color:#3b82f6;
+}
+.final{
+  color:#22c55e;
+  font-size:20px;
+  font-weight:bold;
+}
+.bottom-bar{
+  position:fixed;
+  bottom:0;
+  width:100%;
+  background:black;
+  padding:12px;
+}
+button{
+  width:100%;
+  padding:14px;
+  margin-top:8px;
+  border:none;
+  border-radius:10px;
+  font-size:16px;
+}
+.pay{ background:#22c55e; }
+.modify{ background:#64748b; }
+</style>
+
+</head>
+
+<body>
+
+<h2 style="text-align:center;">🧾 Order Summary</h2>
+
+<div class="container">
+
+<div id="list" class="box"></div>
+
+<div class="box">
+
+<div class="line">
+<span>Books Total</span>
+<span>₹<span id="total"></span></span>
+</div>
+
+<div class="line">
+<span>Market Price</span>
+<span class="strike">₹<span id="mrp"></span></span>
+</div>
+
+<div class="line bundle">
+<span>Bundle Discount</span>
+<span>-₹<span id="bundle"></span></span>
+</div>
+
+<div class="line shipping">
+<span>Shipping</span>
+<span>₹<span id="shipping"></span></span>
+</div>
+
+<div class="line final">
+<span>Final Payable</span>
+<span>₹<span id="final"></span></span>
+</div>
+
+</div>
+
+</div>
+
+<div class="bottom-bar">
+<button class="modify" onclick="modify()">Modify Order</button>
+<button class="pay" onclick="pay()">Pay Now</button>
+</div>
+
+<script>
+
+let ids = JSON.parse(localStorage.getItem("selectedBooks")) || [];
+let bundle = localStorage.getItem("bundleApplied") === "true";
+let shipping = parseInt(localStorage.getItem("shippingCost")) || 0;
+
+let books = [], finalIds = [];
+
+async function load(){
+
+  try{
+    const res = await fetch("http://127.0.0.1:3000/books");
+    books = await res.json();
+
+    let total=0, mrp=0, html="";
+
+    ids.forEach(id=>{
+      const b = books.find(x=>x.id === id);
+      if(b){
+        finalIds.push(id);
+        total += b.price;
+        mrp += b.price * 4;
+        html += `<p>${b.name} — ₹${b.price}</p>`;
+      }
+    });
+
+    let bundleDiscount = 0;
+
+    if(bundle){
+      bundleDiscount = 100;
+      total -= 100;
+    }
+
+    let final = total + shipping;
+
+    document.getElementById("list").innerHTML = html;
+    document.getElementById("total").innerText = total;
+    document.getElementById("mrp").innerText = mrp;
+    document.getElementById("bundle").innerText = bundleDiscount;
+    document.getElementById("shipping").innerText = shipping;
+    document.getElementById("final").innerText = final;
+
+  }catch(err){
+    alert("Failed to load data");
+  }
+}
+
+function modify(){
+  window.location = "index.html";
+}
+
+// 🔥 FINAL FIXED PAYMENT
+async function pay(){
+
+  try{
+
+    let amount = parseInt(document.getElementById("final").innerText);
+
+    if(!amount || amount <= 0){
+      alert("Invalid amount");
+      return;
+    }
+
+    const response = await fetch("http://127.0.0.1:3000/create-order",{
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ amount })
+    });
+
+    const data = await response.json();
+
+    console.log("ORDER RESPONSE:", data);
+
+    // ❌ HANDLE BACKEND FAILURE
+    if(!data.id){
+      alert("Order creation failed. Check backend or Razorpay keys.");
+      return;
+    }
+
+    const rzp = new Razorpay({
+      key: "rzp_test_SguP9aeomm5pPh", // replace
+      amount: data.amount,
+      currency: "INR",
+      order_id: data.id,
+
+      handler: function(){
+        window.location = "thankyou.html";
+      },
+
+      modal:{
+        ondismiss:function(){
+          console.log("Payment popup closed");
+        }
+      }
+    });
+
+    rzp.on('payment.failed', function (response) {
+      console.log("FAIL:", response.error);
+      alert("Payment failed. Try again.");
+    });
+
+    rzp.open();
+
+  }catch(err){
+    console.log("ERROR:", err);
+    alert("Server not responding. Make sure backend is running.");
+  }
+}
+
+load();
+
+</script>
+
+</body>
+</html>
