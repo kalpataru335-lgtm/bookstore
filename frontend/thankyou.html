@@ -98,7 +98,7 @@ let books = [];
 // ===== LOAD =====
 async function load(){
 
-  const res = await fetch("http://127.0.0.1:3000/books");
+  const res = await fetch("https://bookstore-backend-971c.onrender.com/books");
   books = await res.json();
 
   let total = 0;
