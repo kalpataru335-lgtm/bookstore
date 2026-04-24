@@ -75,14 +75,14 @@ input{
 
 <body>
 
-<div class="container">
+<div class="container" id="main-content">
 
 <h2>📦 Delivery Details</h2>
 
 <input id="name" placeholder="Full Name">
-<input id="phone" placeholder="Phone Number">
+<input id="phone" placeholder="Phone Number" inputmode="numeric">
 <input id="address" placeholder="Full Address">
-<input id="pincode" placeholder="Pincode">
+<input id="pincode" placeholder="Pincode" inputmode="numeric">
 
 <button class="calc-btn" onclick="calculateShipping()">
 Calculate Shipping
@@ -107,56 +107,64 @@ Calculate Shipping
 // ===== STATE =====
 let selected = JSON.parse(localStorage.getItem("selectedBooks")) || [];
 let books = [];
+
+// 🔥 RESET SHIPPING EVERY VISIT (PREVENT STALE DATA)
+localStorage.removeItem("shippingCost");
 let shippingCost = 0;
 let calculated = false;
 
-// ===== LOAD =====
+// ===== LOAD INITIAL DATA =====
 async function load(){
+  try{
+    // 🔥 NO-CACHE FETCH FOR LIVE AVAILABILITY
+    const res = await fetch("https://bookstore-backend-971c.onrender.com/books", { cache: "no-store" });
+    books = await res.json();
 
-  const res = await fetch("http://127.0.0.1:3000/books");
-  books = await res.json();
+    let weight = 0;
 
-  let weight = 0;
+    selected.forEach(id=>{
+      const b = books.find(x=>x.id === id);
+      if(b) weight += b.weight;
+    });
 
-  selected.forEach(id=>{
-    const b = books.find(x=>x.id === id);
-    if(b) weight += b.weight;
-  });
+    document.getElementById("weight").innerText = weight;
 
-  document.getElementById("weight").innerText = weight;
+    // PREFILL USER DATA
+    const user = JSON.parse(localStorage.getItem("userDetails"));
+    if(user){
+      document.getElementById("name").value = user.name || "";
+      document.getElementById("phone").value = user.phone || "";
+      document.getElementById("address").value = user.address || "";
+      document.getElementById("pincode").value = user.pincode || "";
+    }
+    
+    enableBtn(); // Re-evaluate button for prefilled data
 
-  // PREFILL USER
-  const user = JSON.parse(localStorage.getItem("userDetails"));
-  if(user){
-    document.getElementById("name").value = user.name || "";
-    document.getElementById("phone").value = user.phone || "";
-    document.getElementById("address").value = user.address || "";
-    document.getElementById("pincode").value = user.pincode || "";
-  }
-
-  // PREFILL SHIPPING
-  const saved = localStorage.getItem("shippingCost");
-  if(saved){
-    shippingCost = parseInt(saved);
-    document.getElementById("shipping").innerText = shippingCost;
-
-    calculated = true;
-    enableBtn();
+  } catch(err){
+    // PRODUCTION ERROR UI
+    document.getElementById("main-content").innerHTML =
+      "<div style='text-align:center; padding-top:50px;'>" +
+      "❌ Failed to load books. <br><br>" +
+      "<button class='calc-btn' onclick='location.reload()'>Retry</button>" +
+      "</div>";
   }
 }
 
 // ===== REALTIME VALIDATION & RESET PIN =====
 document.getElementById("pincode").addEventListener("input", ()=>{
   calculated = false;
+  shippingCost = 0;
   document.getElementById("shipping").innerText = 0;
+  localStorage.removeItem("shippingCost");
   disableBtn();
+  enableBtn(); 
 });
 
 document.getElementById("name").addEventListener("input", enableBtn);
 document.getElementById("phone").addEventListener("input", enableBtn);
 document.getElementById("address").addEventListener("input", enableBtn);
 
-// ===== HELPERS =====
+// ===== UI HELPERS =====
 
 function enableBtn(){
   const name = document.getElementById("name");
@@ -167,10 +175,10 @@ function enableBtn(){
 
   const valid =
     name.value.trim() !== "" &&
-    /^\d{10}$/.test(phone.value.trim()) &&
     address.value.trim() !== "" &&
-    pincode.value.trim().length === 6 &&
-    calculated;
+    /^\d{10}$/.test(phone.value.trim()) &&
+    /^\d{6}$/.test(pincode.value.trim()) &&
+    calculated === true;
 
   continueBtn.disabled = !valid;
   
@@ -187,9 +195,8 @@ function disableBtn(){
   btn.classList.remove("enabled");
 }
 
-// ===== CORE LOGIC =====
+// ===== SHIPPING LOGIC =====
 
-// density based volume
 function getChargeableWeight(weight){
   let volume = weight * 900;
   let side = Math.cbrt(volume);
@@ -197,111 +204,96 @@ function getChargeableWeight(weight){
   return Math.max(weight, volumetric);
 }
 
-// calibrated India Post pricing
 function getCalibratedCost(weight){
-
   if(weight <= 1) return 80;
   if(weight <= 2) return 120;
   if(weight <= 3) return 160;
   if(weight <= 5) return 200;
   if(weight <= 10) return 300;
-
   return 300 + (weight - 10) * 25;
 }
 
-// ===== FINAL SHIPPING =====
 function calculateShipping(){
-
+  const name = document.getElementById("name").value.trim();
+  const phone = document.getElementById("phone").value.trim();
+  const address = document.getElementById("address").value.trim();
   const pincode = document.getElementById("pincode").value.trim();
 
-  if(pincode.length !== 6){
-    alert("Enter valid pincode");
+  // STRICTOR VALIDATION BEFORE CALC
+  if(name === "" || address === "" || !/^\d{10}$/.test(phone) || !/^\d{6}$/.test(pincode)){
+    alert("Fill all details correctly before calculating shipping");
     return;
   }
 
   const origin = "752069";
   let weight = parseFloat(document.getElementById("weight").innerText);
-
   let chargeWeight = getChargeableWeight(weight);
 
-  // ⭐ SPECIAL CASE (IMPORTANT)
-  if(pincode === origin){
-    shippingCost = 161;   // 🔥 exact observed cheapest
-  }
-  else{
+  if(pincode === origin){ 
+    shippingCost = 161; 
+  } else {
     let base = getCalibratedCost(chargeWeight);
-
-    // mild distance adjustment
     let firstDigit = pincode[0];
-
-    if(firstDigit === "7"){
-      base += 20;  // near
-    }else if(firstDigit === "1" || firstDigit === "2"){
-      base += 70;  // far (north)
-    }else{
-      base += 40;  // medium
-    }
-
+    if(firstDigit === "7"){ base += 20; }
+    else if(firstDigit === "1" || firstDigit === "2"){ base += 70; }
+    else{ base += 40; }
     shippingCost = Math.round(base);
   }
-
+  
   document.getElementById("shipping").innerText = shippingCost;
-
   calculated = true;
+  localStorage.setItem("shippingCost", shippingCost);
   enableBtn();
 }
 
-// ===== CONTINUE =====
+// ===== NAVIGATION =====
 async function goNext(){
-
-  if(!calculated){
-    alert("Calculate shipping first");
-    return;
-  }
-
-  const user = {
-    name: document.getElementById("name").value.trim(),
-    phone: document.getElementById("phone").value.trim(),
-    address: document.getElementById("address").value.trim(),
-    pincode: document.getElementById("pincode").value.trim()
+  if(!calculated){ alert("Calculate shipping first"); return; }
+  
+  const user = { 
+    name: document.getElementById("name").value.trim(), 
+    phone: document.getElementById("phone").value.trim(), 
+    address: document.getElementById("address").value.trim(), 
+    pincode: document.getElementById("pincode").value.trim() 
   };
 
-  if(!user.name || !user.phone || !user.address || !user.pincode){
-    alert("Fill all details");
-    return;
-  }
+  if(!user.name || !user.phone || !user.address || !user.pincode){ alert("Fill all details"); return; }
 
   localStorage.setItem("userDetails", JSON.stringify(user));
   localStorage.setItem("shippingCost", shippingCost);
 
-  // 🔥 CHECK 1 — recheck availability before moving forward
-  const res = await fetch("http://127.0.0.1:3000/books");
-  const latest = await res.json();
+  // 🔥 CHECK AVAILABILITY ONE LAST TIME BEFORE SUMMARY
+  try {
+    const res = await fetch("https://bookstore-backend-971c.onrender.com/books", { cache: "no-store" });
+    const latest = await res.json();
 
-  let removed = [];
+    let removed = [];
+    selected = selected.filter(id=>{
+      const b = latest.find(x=>x.id === id);
+      if(!b || b.status !== "available"){ 
+        removed.push(b?.name || "Book"); 
+        return false; 
+      }
+      return true;
+    });
 
-  selected = selected.filter(id=>{
-    const b = latest.find(x=>x.id === id);
-    if(!b || b.status !== "available"){
-      removed.push(b?.name || "Book");
-      return false;
+    localStorage.setItem("selectedBooks", JSON.stringify(selected));
+
+    if(removed.length > 0){
+      alert("Some books became unavailable:\n" + removed.join("\n"));
+      window.location.href = "index.html";
+      return;
     }
-    return true;
-  });
-
-  localStorage.setItem("selectedBooks", JSON.stringify(selected));
-
-  if(removed.length > 0){
-    alert("Some books became unavailable:\n" + removed.join("\n"));
-    window.location.href = "index.html";
-    return;
+    
+    window.location.href = "summary.html";
+    
+  } catch(err) {
+    alert("Network error. Please check your connection and try again.");
   }
-
-  // ✅ IF ALL GOOD → GO TO SUMMARY
-  window.location.href = "summary.html";
 }
 
 // ===== INIT =====
+document.getElementById("continueBtn").disabled = true;
 load();
 
 </script>

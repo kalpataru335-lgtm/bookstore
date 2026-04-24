@@ -33,6 +33,7 @@
   padding:6px 10px;
   border-radius:8px;
   color:#22c55e;
+  transition: opacity 0.2s;
 }
 .shipping{
   color:#3b82f6;
@@ -76,6 +77,11 @@ button{
 <div class="container">
 
 <div id="list" class="box"></div>
+
+<div id="unavailableBox" class="box" style="display:none; border:1px solid #ef4444;">
+  <b style="color: #ef4444;">❌ These books are unavailable:</b>
+  <div id="unavailableList"></div>
+</div>
 
 <div class="box">
 
@@ -125,143 +131,184 @@ button{
 <script>
 
 let ids = JSON.parse(localStorage.getItem("selectedBooks")) || [];
-let bundle = localStorage.getItem("bundleApplied") === "true";
 let shipping = parseInt(localStorage.getItem("shippingCost")) || 0;
 
 let books = [];
+let calculatedTotal = 0; // Secure state variable
 
+// ===== INITIAL LOAD =====
 async function load(){
 
+  // 🔥 PROTECTION: REDIRECT IF SHIPPING NOT CALCULATED
+  if(!localStorage.getItem("shippingCost")){
+    alert("Please calculate shipping before proceeding");
+    window.location.href = "details.html";
+    return;
+  }
+
   try{
-    const res = await fetch("https://bookstore-backend-971c.onrender.com/books");
+    // 🔥 NO-CACHE FETCH FOR PRODUCTION
+    const res = await fetch("https://bookstore-backend-971c.onrender.com/books", { cache: "no-store" });
     books = await res.json();
 
     let total=0, mrp=0, html="", rawTotal=0;
+    let unavailable = [];
 
     ids.forEach(id=>{
       const b = books.find(x=>x.id === id);
-      if(b){
+
+      if(b && b.status === "available"){
         rawTotal += b.price;
         total += b.price;
         mrp += b.price * 4;
-        html += `<p>${b.name} — ₹${b.price}</p>`;
+        html += `<div class="line"><span>${b.name}</span><span>₹${b.price}</span></div>`;
+      }
+      else{
+        unavailable.push(b?.name || "Book");
       }
     });
 
-    if(rawTotal < 160){
-      alert("Order below ₹160");
+    // SYNC STATE
+    ids = ids.filter(id=>{
+      const b = books.find(x=>x.id === id);
+      return b && b.status === "available";
+    });
+
+    localStorage.setItem("selectedBooks", JSON.stringify(ids));
+
+    // PROTECTION: EMPTY CART
+    if(ids.length === 0){
+      alert("All selected books are unavailable");
       window.location.href = "index.html";
       return;
     }
 
+    // PROTECTION: MINIMUM ORDER (ONLY IF CART NOT EMPTY)
+    if(ids.length > 0 && rawTotal < 160){
+      alert("Order below ₹160. Please add more books.");
+      setTimeout(()=>{ window.location.href = "index.html"; }, 500);
+      return;
+    }
+
+    // BUNDLE DISCOUNT LOGIC
     let bundleDiscount = 0;
     const availableCount = books.filter(b => b.status === "available").length;
+    const isBundle = ids.length === availableCount && availableCount > 0;
 
-    if(bundle && ids.length === availableCount && availableCount > 0){
+    if(isBundle){
       bundleDiscount = 100;
       total -= 100;
     }
 
-    let final = total + shipping;
-    const youSave = mrp - total;
-
+    calculatedTotal = total + shipping; // Secure Internal Calculation
+    
+    // RENDER UI
     document.getElementById("list").innerHTML = html;
+    
+    // Reset/Show Unavailable Box
+    const uBox = document.getElementById("unavailableBox");
+    uBox.style.display = "none";
+    if(unavailable.length > 0){
+      uBox.style.display = "block";
+      document.getElementById("unavailableList").innerHTML =
+        unavailable.map(x => `<p>${x}</p>`).join("");
+    }
+
     document.getElementById("total").innerText = total;
     document.getElementById("mrp").innerText = mrp;
     document.getElementById("bundle").innerText = bundleDiscount;
-    document.getElementById("save").innerText = youSave;
+    document.querySelector(".bundle").style.opacity = isBundle ? "1" : "0.6";
+    document.getElementById("save").innerText = mrp - total;
     document.getElementById("shipping").innerText = shipping;
-    document.getElementById("final").innerText = final;
+    document.getElementById("final").innerText = calculatedTotal;
 
   }catch(err){
-    alert("Failed to load data");
+    alert("Failed to load summary data. Please retry.");
   }
 }
 
 function modify(){
+  localStorage.setItem("bundleApplied","false");
+  localStorage.removeItem("shippingCost");
+  localStorage.removeItem("userDetails");
   window.location = "index.html";
 }
 
-// 🔥 FINAL FIXED PAYMENT
+// ===== SECURE PAYMENT FLOW =====
 async function pay(){
+  const payBtn = document.getElementById("payBtn");
 
-  // 🔥 CHECK 2 — recheck availability before payment
-  const res = await fetch("http://127.0.0.1:3000/books");
-  const latest = await res.json();
-
-  let removed = [];
-
-  ids = ids.filter(id=>{
-    const b = latest.find(x=>x.id === id);
-    if(!b || b.status !== "available"){
-      removed.push(b?.name || "Book");
-      return false;
-    }
-    return true;
-  });
-
-  localStorage.setItem("selectedBooks", JSON.stringify(ids));
-
-  if(removed.length > 0){
-    alert("Some books were just sold:\n" + removed.join("\n"));
-    window.location.href = "index.html";
+  // 1. HARD ENFORCEMENT OF TERMS
+  if(!document.getElementById("terms").checked){
+    alert("Please accept terms & conditions");
     return;
   }
 
-  if(ids.length === 0){
-    alert("No books selected");
-    return;
-  }
+  // 2. DOUBLE-CLICK PROTECTION
+  payBtn.disabled = true;
+  payBtn.innerText = "Processing...";
 
-  // 🔒 LOCK BOOKS
-  const lockRes = await fetch("http://127.0.0.1:3000/lock-books", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ids: ids })
-  });
+  try {
+    // 🔥 CHECK 2: FRESH AVAILABILITY CHECK
+    const res = await fetch("https://bookstore-backend-971c.onrender.com/books", { cache: "no-store" });
+    const latest = await res.json();
 
-  const lockData = await lockRes.json();
+    let removed = [];
+    ids = ids.filter(id=>{
+      const b = latest.find(x=>x.id === id);
+      if(!b || b.status !== "available"){
+        removed.push(b?.name || "Book");
+        return false;
+      }
+      return true;
+    });
 
-  if(!lockData.success){
-    alert("Some books are no longer available");
-    window.location.href = "index.html";
-    return;
-  }
-
-  try{
-
-    let amount = parseInt(document.getElementById("final").innerText);
-
-    if(!amount || amount <= 0){
-      alert("Invalid amount");
+    if(removed.length > 0){
+      alert("Some books were just sold:\n" + removed.join("\n"));
+      payBtn.disabled = false; payBtn.innerText = "Pay Now";
+      window.location.href = "index.html";
       return;
     }
 
-    const response = await fetch("http://127.0.0.1:3000/create-order",{
+    // 3. LOCK INVENTORY
+    const lockRes = await fetch("https://bookstore-backend-971c.onrender.com/lock-books", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: ids })
+    });
+
+    const lockData = await lockRes.json();
+    if(!lockData.success){
+      alert("Inventory sync failed. Books no longer available.");
+      payBtn.disabled = false; payBtn.innerText = "Pay Now";
+      window.location.href = "index.html";
+      return;
+    }
+
+    // 4. CREATE RAZORPAY ORDER
+    const response = await fetch("https://bookstore-backend-971c.onrender.com/create-order",{
       method:"POST",
       headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ amount })
+      body: JSON.stringify({ amount: calculatedTotal })
     });
 
     const data = await response.json();
-
-    console.log("ORDER RESPONSE:", data);
-
-    // ❌ HANDLE BACKEND FAILURE
     if(!data.id){
-      alert("Order creation failed. Check backend or Razorpay keys.");
+      alert("Order creation failed. Contact support.");
+      payBtn.disabled = false; payBtn.innerText = "Pay Now";
       return;
     }
 
+    // 5. INITIALIZE CHECKOUT
     const rzp = new Razorpay({
-      key: "rzp_test_SguP9aeomm5pPh", // replace
+      key: "rzp_test_SguP9aeomm5pPh", // Replace with LIVE Key eventually
       amount: data.amount,
       currency: "INR",
       order_id: data.id,
 
       handler: async function (response) {
-        // ✅ VERIFY + MARK SOLD
-        await fetch("http://127.0.0.1:3000/verify-payment", {
+        // 🔥 VERIFY + SYNC
+        const vRes = await fetch("https://bookstore-backend-971c.onrender.com/verify-payment", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -270,14 +317,24 @@ async function pay(){
           })
         });
 
-        window.location.href = "thankyou.html";
+        const vData = await vRes.json();
+        if(vData.success){
+          window.location.href = "thankyou.html";
+        } else {
+          alert("Payment verification failed. Unlocking books.");
+          await fetch("https://bookstore-backend-971c.onrender.com/unlock-books", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: ids })
+          });
+          payBtn.disabled = false; payBtn.innerText = "Pay Now";
+        }
       },
 
       modal:{
         ondismiss: async function(){
-          console.log("Payment popup closed");
-          // 🔓 UNLOCK BOOKS
-          await fetch("http://127.0.0.1:3000/unlock-books", {
+          payBtn.disabled = false; payBtn.innerText = "Pay Now";
+          await fetch("https://bookstore-backend-971c.onrender.com/unlock-books", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ ids: ids })
@@ -287,11 +344,9 @@ async function pay(){
     });
 
     rzp.on('payment.failed', async function (response) {
-      console.log("FAIL:", response.error);
-      alert("Payment failed. Try again.");
-
-      // 🔓 UNLOCK BOOKS (IMPORTANT FIX)
-      await fetch("http://127.0.0.1:3000/unlock-books", {
+      alert("Payment failed. Inventory released.");
+      payBtn.disabled = false; payBtn.innerText = "Pay Now";
+      await fetch("https://bookstore-backend-971c.onrender.com/unlock-books", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: ids })
@@ -300,13 +355,19 @@ async function pay(){
 
     rzp.open();
 
-  }catch(err){
-    console.log("ERROR:", err);
-    alert("Server not responding. Make sure backend is running.");
+  } catch(err) {
+    // 🔥 STABILITY: UNLOCK ON SERVER ERROR
+    alert("An unexpected error occurred. Please try again.");
+    await fetch("https://bookstore-backend-971c.onrender.com/unlock-books", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: ids })
+    });
+    payBtn.disabled = false; payBtn.innerText = "Pay Now";
   }
 }
 
-// TERMS CHECKBOX LOGIC
+// TERMS LOGIC
 const payBtn = document.getElementById("payBtn");
 const terms = document.getElementById("terms");
 
