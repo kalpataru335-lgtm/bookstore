@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: bookstore-backend
+    env: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: KEY_ID
+        value: rzp_test_SguP9aeomm5pPh
+      - key: KEY_SECRET
+        value: Y9bSS39BVhfjsZznrJdeX5Y1
