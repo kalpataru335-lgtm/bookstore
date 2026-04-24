@@ -1,4 +1,3 @@
-
 // ===== STATE =====
 let selected = JSON.parse(localStorage.getItem("selectedBooks")) || [];
 let booksData = [];
@@ -96,6 +95,10 @@ function toggleSelection(id){
     selected.push(id);
   }
 
+  // 🔥 RESET BUNDLE ON ANY MANUAL CHANGE
+  bundleApplied = false;
+  localStorage.setItem("bundleApplied","false");
+
   localStorage.setItem("selectedBooks", JSON.stringify(selected));
   renderBooks(booksData);
 }
@@ -103,14 +106,19 @@ function toggleSelection(id){
 // ===== TOTAL =====
 function updateTotal(){
 
+  let rawTotal = 0;
   let total = 0;
 
   selected.forEach(id=>{
     const b = booksData.find(x=>x.id === id);
-    if(b) total += b.price;
+    if(b) rawTotal += b.price;
   });
 
-  if(bundleApplied && selected.length > 0){
+  total = rawTotal;
+
+  const availableCount = booksData.filter(b => b.status === "available").length;
+
+  if(bundleApplied && selected.length === availableCount && availableCount > 0){
     total -= 100;
   }
 
@@ -118,11 +126,11 @@ function updateTotal(){
 
   const msg = document.getElementById("msg");
 
-  if(total <= 0){
+  if(rawTotal <= 0){
     msg.innerText = "Minimum ₹160 required";
   }
-  else if(total < 160){
-    msg.innerText = `Add ₹${160 - total} more to order`;
+  else if(rawTotal < 160){
+    msg.innerText = `Add ₹${160 - rawTotal} more to order`;
   }
   else{
     msg.innerText = "Ready to proceed";
@@ -132,18 +140,14 @@ function updateTotal(){
 // ===== CONTINUE =====
 function goNext(){
 
-  let total = 0;
+  let rawTotal = 0;
 
   selected.forEach(id=>{
     const b = booksData.find(x=>x.id === id);
-    if(b) total += b.price;
+    if(b) rawTotal += b.price;
   });
 
-  if(bundleApplied){
-    total -= 100;
-  }
-
-  if(total < 160){
+  if(rawTotal < 160){
     alert("Minimum ₹160 required");
     return;
   }

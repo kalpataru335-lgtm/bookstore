@@ -145,19 +145,40 @@ async function load(){
   }
 }
 
-// ===== RESET PIN =====
+// ===== REALTIME VALIDATION & RESET PIN =====
 document.getElementById("pincode").addEventListener("input", ()=>{
   calculated = false;
   document.getElementById("shipping").innerText = 0;
   disableBtn();
 });
 
+document.getElementById("name").addEventListener("input", enableBtn);
+document.getElementById("phone").addEventListener("input", enableBtn);
+document.getElementById("address").addEventListener("input", enableBtn);
+
 // ===== HELPERS =====
 
 function enableBtn(){
-  const btn = document.getElementById("continueBtn");
-  btn.disabled = false;
-  btn.classList.add("enabled");
+  const name = document.getElementById("name");
+  const phone = document.getElementById("phone");
+  const address = document.getElementById("address");
+  const pincode = document.getElementById("pincode");
+  const continueBtn = document.getElementById("continueBtn");
+
+  const valid =
+    name.value.trim() !== "" &&
+    /^\d{10}$/.test(phone.value.trim()) &&
+    address.value.trim() !== "" &&
+    pincode.value.trim().length === 6 &&
+    calculated;
+
+  continueBtn.disabled = !valid;
+  
+  if(valid){
+    continueBtn.classList.add("enabled");
+  } else {
+    continueBtn.classList.remove("enabled");
+  }
 }
 
 function disableBtn(){
@@ -231,7 +252,7 @@ function calculateShipping(){
 }
 
 // ===== CONTINUE =====
-function goNext(){
+async function goNext(){
 
   if(!calculated){
     alert("Calculate shipping first");
@@ -253,6 +274,30 @@ function goNext(){
   localStorage.setItem("userDetails", JSON.stringify(user));
   localStorage.setItem("shippingCost", shippingCost);
 
+  // 🔥 CHECK 1 — recheck availability before moving forward
+  const res = await fetch("http://127.0.0.1:3000/books");
+  const latest = await res.json();
+
+  let removed = [];
+
+  selected = selected.filter(id=>{
+    const b = latest.find(x=>x.id === id);
+    if(!b || b.status !== "available"){
+      removed.push(b?.name || "Book");
+      return false;
+    }
+    return true;
+  });
+
+  localStorage.setItem("selectedBooks", JSON.stringify(selected));
+
+  if(removed.length > 0){
+    alert("Some books became unavailable:\n" + removed.join("\n"));
+    window.location.href = "index.html";
+    return;
+  }
+
+  // ✅ IF ALL GOOD → GO TO SUMMARY
   window.location.href = "summary.html";
 }
 

@@ -57,8 +57,14 @@ button{
   border-radius:10px;
   font-size:16px;
 }
-.pay{ background:#22c55e; }
+.pay{ background:#22c55e; transition: opacity 0.2s; }
 .modify{ background:#64748b; }
+.terms-label{
+  color: white;
+  display: block;
+  margin-bottom: 10px;
+  font-size: 14px;
+}
 </style>
 
 </head>
@@ -88,6 +94,11 @@ button{
 <span>-₹<span id="bundle"></span></span>
 </div>
 
+<div class="line" style="color:#facc15;">
+<span>You Save</span>
+<span>₹<span id="save"></span></span>
+</div>
+
 <div class="line shipping">
 <span>Shipping</span>
 <span>₹<span id="shipping"></span></span>
@@ -103,8 +114,12 @@ button{
 </div>
 
 <div class="bottom-bar">
+<label class="terms-label">
+  <input type="checkbox" id="terms">
+  I agree to terms & conditions
+</label>
 <button class="modify" onclick="modify()">Modify Order</button>
-<button class="pay" onclick="pay()">Pay Now</button>
+<button id="payBtn" class="pay" onclick="pay()">Pay Now</button>
 </div>
 
 <script>
@@ -113,39 +128,48 @@ let ids = JSON.parse(localStorage.getItem("selectedBooks")) || [];
 let bundle = localStorage.getItem("bundleApplied") === "true";
 let shipping = parseInt(localStorage.getItem("shippingCost")) || 0;
 
-let books = [], finalIds = [];
+let books = [];
 
 async function load(){
 
   try{
-    const res = await fetch("http://127.0.0.1:3000/books");
+    const res = await fetch("https://bookstore-backend-971c.onrender.com/books");
     books = await res.json();
 
-    let total=0, mrp=0, html="";
+    let total=0, mrp=0, html="", rawTotal=0;
 
     ids.forEach(id=>{
       const b = books.find(x=>x.id === id);
       if(b){
-        finalIds.push(id);
+        rawTotal += b.price;
         total += b.price;
         mrp += b.price * 4;
         html += `<p>${b.name} — ₹${b.price}</p>`;
       }
     });
 
-    let bundleDiscount = 0;
+    if(rawTotal < 160){
+      alert("Order below ₹160");
+      window.location.href = "index.html";
+      return;
+    }
 
-    if(bundle){
+    let bundleDiscount = 0;
+    const availableCount = books.filter(b => b.status === "available").length;
+
+    if(bundle && ids.length === availableCount && availableCount > 0){
       bundleDiscount = 100;
       total -= 100;
     }
 
     let final = total + shipping;
+    const youSave = mrp - total;
 
     document.getElementById("list").innerHTML = html;
     document.getElementById("total").innerText = total;
     document.getElementById("mrp").innerText = mrp;
     document.getElementById("bundle").innerText = bundleDiscount;
+    document.getElementById("save").innerText = youSave;
     document.getElementById("shipping").innerText = shipping;
     document.getElementById("final").innerText = final;
 
@@ -160,6 +184,49 @@ function modify(){
 
 // 🔥 FINAL FIXED PAYMENT
 async function pay(){
+
+  // 🔥 CHECK 2 — recheck availability before payment
+  const res = await fetch("http://127.0.0.1:3000/books");
+  const latest = await res.json();
+
+  let removed = [];
+
+  ids = ids.filter(id=>{
+    const b = latest.find(x=>x.id === id);
+    if(!b || b.status !== "available"){
+      removed.push(b?.name || "Book");
+      return false;
+    }
+    return true;
+  });
+
+  localStorage.setItem("selectedBooks", JSON.stringify(ids));
+
+  if(removed.length > 0){
+    alert("Some books were just sold:\n" + removed.join("\n"));
+    window.location.href = "index.html";
+    return;
+  }
+
+  if(ids.length === 0){
+    alert("No books selected");
+    return;
+  }
+
+  // 🔒 LOCK BOOKS
+  const lockRes = await fetch("http://127.0.0.1:3000/lock-books", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids: ids })
+  });
+
+  const lockData = await lockRes.json();
+
+  if(!lockData.success){
+    alert("Some books are no longer available");
+    window.location.href = "index.html";
+    return;
+  }
 
   try{
 
@@ -192,20 +259,43 @@ async function pay(){
       currency: "INR",
       order_id: data.id,
 
-      handler: function(){
-        window.location = "thankyou.html";
+      handler: async function (response) {
+        // ✅ VERIFY + MARK SOLD
+        await fetch("http://127.0.0.1:3000/verify-payment", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            paymentId: response.razorpay_payment_id,
+            ids: ids
+          })
+        });
+
+        window.location.href = "thankyou.html";
       },
 
       modal:{
-        ondismiss:function(){
+        ondismiss: async function(){
           console.log("Payment popup closed");
+          // 🔓 UNLOCK BOOKS
+          await fetch("http://127.0.0.1:3000/unlock-books", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: ids })
+          });
         }
       }
     });
 
-    rzp.on('payment.failed', function (response) {
+    rzp.on('payment.failed', async function (response) {
       console.log("FAIL:", response.error);
       alert("Payment failed. Try again.");
+
+      // 🔓 UNLOCK BOOKS (IMPORTANT FIX)
+      await fetch("http://127.0.0.1:3000/unlock-books", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: ids })
+      });
     });
 
     rzp.open();
@@ -215,6 +305,18 @@ async function pay(){
     alert("Server not responding. Make sure backend is running.");
   }
 }
+
+// TERMS CHECKBOX LOGIC
+const payBtn = document.getElementById("payBtn");
+const terms = document.getElementById("terms");
+
+payBtn.disabled = true;
+payBtn.style.opacity = "0.5";
+
+terms.addEventListener("change", ()=>{
+  payBtn.disabled = !terms.checked;
+  payBtn.style.opacity = terms.checked ? "1" : "0.5";
+});
 
 load();
 
