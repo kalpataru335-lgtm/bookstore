@@ -4,6 +4,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Order Successful</title>
 <link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <style>
 .container{ max-width:600px; margin:auto; padding:16px; }
@@ -30,7 +31,7 @@ button{ width:100%; padding:14px; border:none; border-radius:10px; margin-top:10
 
     <pre id="receiptDisplay">Loading receipt...</pre>
 
-    <button class="download" onclick="downloadReceipt()">⬇ Download Receipt (TXT)</button>
+    <button class="download" onclick="downloadReceipt()">⬇ Download Receipt (PDF)</button>
     <button class="home" onclick="goHome()">Back to Home</button>
 </div>
 
@@ -43,21 +44,31 @@ if (receipt) {
     document.getElementById("receiptDisplay").innerText = "No receipt found. Please check your email/messages.";
 }
 
-function downloadReceipt(){
-    if (!receipt) return alert("No receipt found to download.");
+// 🟢 STEP 2 — REPLACE downloadReceipt() FUNCTION
+async function downloadReceipt() {
+  if (!receipt) return alert("No receipt found to download.");
 
-    const blob = new Blob([receipt], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "Sourav_Bookstore_Receipt.txt";
-    
-    document.body.appendChild(link);
-    link.click();
-    
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+
+  const lines = receipt.split("\n");
+  let y = 10;
+
+  doc.setFont("monospace");
+  doc.setFontSize(10);
+
+  lines.forEach(line => {
+    doc.text(line, 10, y);
+    y += 7;
+
+    // auto page break
+    if (y > 280) {
+      doc.addPage();
+      y = 10;
+    }
+  });
+
+  doc.save("Sourav_Bookstore_Receipt.pdf");
 }
 
 function goHome(){
@@ -65,6 +76,7 @@ function goHome(){
     localStorage.removeItem("shippingCost");
     localStorage.removeItem("bundleApplied");
     localStorage.removeItem("finalReceipt");
+    localStorage.removeItem("paymentLock");
     window.location.href = "index.html";
 }
 </script>
