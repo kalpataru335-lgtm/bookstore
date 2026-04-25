@@ -121,11 +121,25 @@ function modify() { localStorage.setItem("bundleApplied","false"); localStorage.
 
 async function pay() {
   const payBtn = document.getElementById("payBtn");
-  if(window.paymentStarted) return;
+  
+  // 🔒 Prevent duplicate payment (persistent)
+  if (localStorage.getItem("paymentLock") === "true") return;
+
+  localStorage.setItem("paymentLock", "true");
   window.paymentStarted = true;
 
-  if(!ids || ids.length === 0) { alert("No books selected"); window.paymentStarted = false; return; }
-  if(!document.getElementById("terms").checked) { alert("Please accept terms & conditions"); window.paymentStarted = false; return; }
+  if(!ids || ids.length === 0) { 
+    localStorage.removeItem("paymentLock");
+    window.paymentStarted = false;
+    alert("No books selected"); 
+    return; 
+  }
+  if(!document.getElementById("terms").checked) { 
+    localStorage.removeItem("paymentLock");
+    window.paymentStarted = false;
+    alert("Please accept terms & conditions"); 
+    return; 
+  }
 
   payBtn.disabled = true;
   payBtn.innerText = "Processing...";
@@ -143,6 +157,7 @@ async function pay() {
     if(removed.length > 0) {
       alert("Some books were sold: " + removed.join(", "));
       window.paymentStarted = false;
+      localStorage.removeItem("paymentLock");
       window.location.href = "index.html";
       return;
     }
@@ -177,18 +192,19 @@ async function pay() {
           if(!confirmRes.ok) throw new Error("Confirmation failed");
           
           localStorage.setItem("finalReceipt", confirmData.receipt);
+          localStorage.removeItem("paymentLock");
           window.location.href = "thankyou.html";
 
         } catch (err) {
           alert("Payment done but record failed. Save Payment ID: " + response.razorpay_payment_id);
           window.paymentStarted = false;
+          localStorage.removeItem("paymentLock");
         }
       },
       modal: {
         ondismiss: async function () {
           console.log("Payment cancelled by user");
 
-          // 🔓 Try unlocking books safely
           try {
             await fetch("https://bookstore-backend-971c.onrender.com/unlock-books", {
               method: "POST",
@@ -199,12 +215,11 @@ async function pay() {
             console.log("Unlock failed (non-critical)");
           }
 
-          // 🔁 Reset UI safely
           window.paymentStarted = false;
+          localStorage.removeItem("paymentLock");
           payBtn.disabled = false;
           payBtn.innerText = "Pay Now";
 
-          // 🧠 Friendly message (NOT error)
           alert("Payment cancelled. You can try again.");
         }
       }
@@ -213,6 +228,7 @@ async function pay() {
   } catch(err) {
     alert("System error. Please refresh.");
     window.paymentStarted = false;
+    localStorage.removeItem("paymentLock");
     payBtn.disabled = false; payBtn.innerText = "Pay Now";
   }
 }

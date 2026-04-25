@@ -80,14 +80,32 @@ This is a system-generated receipt.
 
   orders.push({ id: Date.now(), books: bookList, paymentId, name, phone, address, pincode, amount, time: new Date() });
 
+  let sheetSuccess = false;
+
   try {
+    console.log("📡 Sending data to Google Sheet...");
     const sheetRes = await fetch("https://script.google.com/macros/s/AKfycbysaH5JHd7DIl5t-2zurPEaqOHuxE-E8Af-n5K6pw8PF-rkYDuKdKtVaay_OINg6qFA/exec", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, phone, address, pincode, books: bookList, amount, paymentId })
     });
-    if (sheetRes.ok) console.log("✅ Order saved to Google Sheet");
-  } catch (err) { console.error("❌ Google Sheet Error:", err); }
+
+    const text = await sheetRes.text();
+
+    console.log("📊 Sheet Status:", sheetRes.status);
+    console.log("📊 Sheet Response:", text);
+
+    if (sheetRes.ok) {
+      sheetSuccess = true;
+    }
+
+  } catch (err) {
+    console.log("❌ Sheet Error:", err.message);
+  }
+
+  if (!sheetSuccess) {
+    console.log("⚠️ WARNING: Order not saved to sheet!");
+  }
 
   res.json({ success: true, receipt: receiptText });
 });
