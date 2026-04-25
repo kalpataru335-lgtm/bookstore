@@ -4,7 +4,7 @@ import express from "express";
 import cors from "cors";
 import Razorpay from "razorpay";
 import fetch from "node-fetch";
-import fs from "fs"; // Phase 4: File system for persistence
+import fs from "fs"; // Phase 4: Persistence logic
 
 const app = express();
 app.use(cors());
@@ -12,11 +12,11 @@ app.use(express.json());
 
 const orders = [];
 const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID, // Phase 1: Secured credentials
+  key_id: process.env.RAZORPAY_KEY_ID, // Secured via Environment Variables
   key_secret: process.env.RAZORPAY_KEY_SECRET
 });
 
-// Phase 4: JSON Database Logic
+// Phase 4: Database Persistence
 const DATA_FILE = "./books.json";
 let books = JSON.parse(fs.readFileSync(DATA_FILE));
 
@@ -24,12 +24,12 @@ function saveBooks() {
   fs.writeFileSync(DATA_FILE, JSON.stringify(books, null, 2));
 }
 
-// Order Creation
+// 🛒 Order Creation
 app.post("/create-order", async (req, res) => {
   try {
     const { amount } = req.body;
     const order = await razorpay.orders.create({
-      amount: Math.round(amount * 100), // Convert to Paisa
+      amount: Math.round(amount * 100), // Standard Razorpay Paisa conversion
       currency: "INR",
       receipt: "rcpt_" + Date.now()
     });
@@ -40,12 +40,12 @@ app.post("/create-order", async (req, res) => {
   }
 });
 
-// Order Confirmation
+// ✅ Order Confirmation
 app.post("/confirm-order", async (req, res) => {
   const { ids, paymentId, name, phone, address, pincode, amount } = req.body;
   if (!ids || ids.length === 0) return res.status(400).json({ error: "Invalid order" });
 
-  // Update status and persist to disk
+  // Update status and save to disk
   books = books.map(b => ids.includes(b.id) ? { ...b, status: "sold" } : b);
   saveBooks();
 
@@ -70,7 +70,7 @@ Books:
 • ${bookList}
 
 ------------------------------
-Total Paid: ₹${amount}
+Total Paid: Rs.${amount}
 
 Payment ID: ${paymentId}
 Date: ${new Date().toLocaleString()}
@@ -81,7 +81,7 @@ Thank you for your purchase 🙏
 
   orders.push({ id: Date.now(), books: bookList, paymentId, name, phone, address, pincode, amount, time: new Date() });
 
-  // Phase 3: Reliable Google Sheet Integration
+  // Phase 3: Google Sheet Reliability
   let sheetSuccess = false;
   try {
     console.log("📡 Sending data to Google Sheet...");
@@ -92,20 +92,16 @@ Thank you for your purchase 🙏
     });
 
     const text = await sheetRes.text();
-    console.log("📊 Sheet Response:", text);
+    console.log("📊 Sheet Response:", text); 
     if (sheetRes.ok) sheetSuccess = true;
   } catch (err) {
     console.log("❌ Sheet Error:", err.message);
   }
 
-  if (!sheetSuccess) {
-    console.log("⚠️ WARNING: Order not saved to sheet!");
-  }
-
   res.json({ success: true, receipt: receiptText });
 });
 
-// Inventory Routes
+// 📚 Inventory Management
 app.get("/books", (req, res) => res.json(books));
 
 app.post("/lock-books", (req, res) => {
@@ -117,12 +113,16 @@ app.post("/lock-books", (req, res) => {
 
 app.post("/unlock-books", (req, res) => {
   const { ids } = req.body;
-  books = books.map(b => ids.includes(b.id) && b.status === "locked" ? { ...b, status: "available", lockedAt: null } : b);
+  books = books.map(b => 
+    ids.includes(b.id) && b.status === "locked" 
+      ? { ...b, status: "available", lockedAt: null } 
+      : b
+  );
   saveBooks();
   res.json({ success: true });
 });
 
-// Auto-cleaning Expired Locks
+// ⏰ Auto-Unlock Expired Locks (3 Minutes)
 setInterval(() => {
   let changed = false;
   books = books.map(b => {

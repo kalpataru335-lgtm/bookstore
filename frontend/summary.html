@@ -31,10 +31,18 @@
     <div class="line" style="color:#3b82f6;"><span>Shipping</span><span>₹<span id="shipping"></span></span></div>
     <div class="line final-line"><span>Final Payable</span><span>₹<span id="final"></span></span></div>
   </div>
+
   <div class="terms-card">
     <label style="display: flex; gap: 12px; cursor: pointer;">
       <input type="checkbox" id="terms" style="width: 22px; height: 22px; accent-color: #22c55e;">
-      <div style="font-size: 14px; color: #e5e7eb;"><b>I agree to the Terms & Conditions</b></div>
+      <div style="font-size: 13px; color: #9ca3af;">
+        <b style="color:#e5e7eb;">I agree to the Terms & Conditions</b>
+        <ul style="margin-top:8px; padding-left:18px;">
+          <li>Payments are non-refundable</li>
+          <li>Books are non-returnable after purchase</li>
+          <li>Books will be locked for 3 minutes after clicking Pay</li>
+        </ul>
+      </div>
     </label>
   </div>
 </div>
@@ -45,11 +53,15 @@
 </div>
 
 <script>
-const API = "https://bookstore-backend-971c.onrender.com";
+const API = "https://bookstore-backend-971c.onrender.com"; 
 let ids = JSON.parse(localStorage.getItem("selectedBooks")) || [];
 let shipping = parseInt(localStorage.getItem("shippingCost")) || 0;
 let books = [];
 let calculatedTotal = 0;
+
+function modify() {
+  window.location.href = "index.html"; 
+}
 
 async function load() {
   if(!localStorage.getItem("shippingCost")) { alert("Calculate shipping first"); window.location.href = "details.html"; return; }
@@ -80,14 +92,18 @@ async function load() {
     document.getElementById("bundle").innerText = bundleDiscount;
     document.getElementById("shipping").innerText = shipping;
     document.getElementById("final").innerText = calculatedTotal;
-    
     localStorage.setItem("finalAmount", calculatedTotal);
   } catch(err) { alert("Failed to load summary."); }
 }
 
 async function pay() {
   const payBtn = document.getElementById("payBtn");
-  if (localStorage.getItem("paymentLock") === "true") return;
+  
+  // Issue F Fix: UX Alert for Lock
+  if (localStorage.getItem("paymentLock") === "true") {
+    alert("Payment already in progress. Please wait.");
+    return;
+  }
   localStorage.setItem("paymentLock", "true");
 
   if(!ids || ids.length === 0 || !document.getElementById("terms").checked) { 
@@ -97,6 +113,7 @@ async function pay() {
   payBtn.disabled = true; payBtn.innerText = "Processing...";
 
   try {
+    // Re-verify availability
     const checkRes = await fetch(API + "/books", { cache: "no-store" });
     const latest = await checkRes.json();
     ids = ids.filter(id => { 
@@ -111,6 +128,7 @@ async function pay() {
       return;
     }
 
+    // 🔥 ISSUE A FIX: LOCK BOOKS BEFORE PAYMENT
     await fetch(API + "/lock-books", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: ids })
     });
@@ -120,12 +138,10 @@ async function pay() {
     });
     const data = await response.json();
 
-    // ✅ CRITICAL ISSUE 2 FIX: Validate order creation
     if (!data || !data.id) {
       alert("Order creation failed. Try again.");
       localStorage.removeItem("paymentLock");
-      payBtn.disabled = false;
-      payBtn.innerText = "Pay Now";
+      payBtn.disabled = false; payBtn.innerText = "Pay Now";
       return;
     }
 
@@ -136,7 +152,6 @@ async function pay() {
       name: "Sourav Bookstore",
       order_id: data.id,
       handler: async function (response) {
-        // ✅ CRITICAL ISSUE 1 FIX: Validate userDetails
         const user = JSON.parse(localStorage.getItem("userDetails"));
         if (!user || !user.name || !user.phone) {
           alert("User details missing. Please re-enter details.");
@@ -144,12 +159,10 @@ async function pay() {
           return;
         }
 
-        const amount = localStorage.getItem("finalAmount");
-
         const res = await fetch(API + "/confirm-order", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            ids, paymentId: response.razorpay_payment_id, amount: amount,
+            ids, paymentId: response.razorpay_payment_id, amount: calculatedTotal,
             name: user.name, phone: user.phone, address: user.address, pincode: user.pincode
           })
         });
@@ -161,10 +174,17 @@ async function pay() {
         }
       },
       modal: {
-        ondismiss: function() { 
+        ondismiss: async function() { 
+          // 🔥 ISSUE 4 FIX: UNLOCK BOOKS ON CANCEL
+          try {
+            await fetch(API + "/unlock-books", {
+              method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: ids })
+            });
+          } catch (e) {}
           localStorage.removeItem("paymentLock"); payBtn.disabled = false; payBtn.innerText = "Pay Now";
         }
       },
+      // Issue E Fix: Removed restrictive display blocks for standard UI
       theme: { color: "#22c55e" }
     };
     new Razorpay(options).open();
