@@ -25,8 +25,9 @@ button{ width:100%; padding:14px; border:none; border-radius:10px; margin-top:10
 <div class="container">
     <div class="success">🎉 Order Successful!</div>
     
-    <div class="box">
-        <p style="text-align: center; color: #9ca3af;">Thank you for your purchase. Your receipt is ready below.</p>
+    <div class="box" style="text-align: center;">
+        <p style="color: #9ca3af; margin-bottom: 5px;">Thank you for your purchase!</p>
+        <p style="color: #22c55e; font-weight: bold;">Order ID: <span id="orderIdDisplay">N/A</span></p>
     </div>
 
     <pre id="receiptDisplay">Loading receipt...</pre>
@@ -40,20 +41,30 @@ const receipt = localStorage.getItem("finalReceipt");
 
 if (receipt) {
     document.getElementById("receiptDisplay").innerText = receipt;
+    
+    // Extract Order ID using regex for the UI display
+    const orderIdMatch = receipt.match(/🆔 Order ID: (.*)/);
+    if (orderIdMatch) {
+        document.getElementById("orderIdDisplay").innerText = orderIdMatch[1];
+    }
 } else {
     document.getElementById("receiptDisplay").innerText = "No receipt found. Please check your email/messages.";
 }
 
-// 🟢 STEP 2 — REPLACE downloadReceipt() FUNCTION
 async function downloadReceipt() {
   if (!receipt) return alert("No receipt found to download.");
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
 
-  const lines = receipt.split("\n");
-  let y = 10;
+  // 🔥 CLEANUP: Replace unsupported unicode symbols to prevent PDF garbage text
+  const cleanReceipt = receipt
+    .replace(/₹/g, "Rs.")
+    .replace(/[^\x00-\x7F]/g, ""); 
 
+  const lines = cleanReceipt.split("\n");
+
+  let y = 10;
   doc.setFont("monospace");
   doc.setFontSize(10);
 
@@ -61,7 +72,7 @@ async function downloadReceipt() {
     doc.text(line, 10, y);
     y += 7;
 
-    // auto page break
+    // Auto page break
     if (y > 280) {
       doc.addPage();
       y = 10;
@@ -72,6 +83,7 @@ async function downloadReceipt() {
 }
 
 function goHome(){
+    // Comprehensive cleanup to prevent ghost locks or stale data on next visit
     localStorage.removeItem("selectedBooks");
     localStorage.removeItem("shippingCost");
     localStorage.removeItem("bundleApplied");

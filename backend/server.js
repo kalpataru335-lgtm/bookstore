@@ -1,35 +1,28 @@
 import dotenv from "dotenv";
-dotenv.config(); // Phase 1: Security initialization
+dotenv.config();
 import express from "express";
 import cors from "cors";
 import Razorpay from "razorpay";
 import fetch from "node-fetch";
-import fs from "fs"; // Phase 4: Persistence logic
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+// 🔴 REPLACE WITH YOUR NEW DEPLOYED APP SCRIPT URL
+const SHEET_API = "https://script.google.com/macros/s/AKfycbysaH5JHd7DIl5t-2zurPEaqOHuxE-E8Af-n5K6pw8PF-rkYDuKdKtVaay_OINg6qFA/exec"; 
+
 const orders = [];
 const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID, // Secured via Environment Variables
+  key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET
 });
 
-// Phase 4: Database Persistence
-const DATA_FILE = "./books.json";
-let books = JSON.parse(fs.readFileSync(DATA_FILE));
-
-function saveBooks() {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(books, null, 2));
-}
-
-// 🛒 Order Creation
 app.post("/create-order", async (req, res) => {
   try {
     const { amount } = req.body;
     const order = await razorpay.orders.create({
-      amount: Math.round(amount * 100), // Standard Razorpay Paisa conversion
+      amount: Math.round(amount * 100),
       currency: "INR",
       receipt: "rcpt_" + Date.now()
     });
@@ -40,60 +33,73 @@ app.post("/create-order", async (req, res) => {
   }
 });
 
-// ✅ Order Confirmation
 app.post("/confirm-order", async (req, res) => {
-  const { ids, paymentId, name, phone, address, pincode, amount } = req.body;
+  // 🔒 CRITICAL FIX 2: Removed amount from req.body to prevent manipulation
+  const { ids, paymentId, name, phone, address, pincode } = req.body;
   if (!ids || ids.length === 0) return res.status(400).json({ error: "Invalid order" });
 
-  // Update status and save to disk
-  books = books.map(b => ids.includes(b.id) ? { ...b, status: "sold" } : b);
-  saveBooks();
+  // 🔒 CRITICAL FIX 2: Recalculate amount directly from the authoritative sheet
+  const r = await fetch(SHEET_API + "?type=books");
+  const currentBooks = await r.json();
 
-  const bookList = books
-    .filter(b => ids.includes(b.id))
-    .map(b => b.name)
-    .join("\n• ");
+  let total = 0;
+  ids.forEach(id => {
+    // 🔒 CRITICAL FIX 1: Strict Type matching
+    const b = currentBooks.find(x => Number(x.id) === Number(id));
+    if (b) total += Number(b.price);
+  });
+
+  const amount = total; // Securely calculated backend amount
+
+  // Update Sold status via Sheet 
+  const updates = ids.map(id => ({ id, status: "sold", lockedAt: "" }));
+  
+  // 🔒 CRITICAL FIX 3: Added Headers to prevent silent JSON parse failures
+  await fetch(SHEET_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "updateBooks", updates })
+  });
+
+  const bookList = currentBooks.filter(b => ids.includes(b.id)).map(b => b.name).join("\n• ");
 
   const receiptText = `
-==============================
+====================================
         SOURAV BOOKSTORE
-==============================
+====================================
 
-Order Receipt
+🧾 ORDER RECEIPT
 
 Name: ${name}
 Phone: ${phone}
 Address: ${address}, ${pincode}
 
-------------------------------
-Books:
+------------------------------------
+📚 Books Purchased:
 • ${bookList}
 
-------------------------------
-Total Paid: Rs.${amount}
+------------------------------------
+💰 Total Paid: Rs.${amount}
 
-Payment ID: ${paymentId}
-Date: ${new Date().toLocaleString()}
+🧾 Payment ID: ${paymentId}
+🆔 Order ID: ${paymentId.slice(-6).toUpperCase()}
+📅 Date: ${new Date().toLocaleString()}
 
-Thank you for your purchase 🙏
-==============================
+------------------------------------
+✔ Order Confirmed
+✔ Delivery in 4–7 days
+
+Thank you for your purchase!
+====================================
 `;
 
-  orders.push({ id: Date.now(), books: bookList, paymentId, name, phone, address, pincode, amount, time: new Date() });
-
-  // Phase 3: Google Sheet Reliability
-  let sheetSuccess = false;
   try {
-    console.log("📡 Sending data to Google Sheet...");
-    const sheetRes = await fetch("https://script.google.com/macros/s/AKfycbysaH5JHd7DIl5t-2zurPEaqOHuxE-E8Af-n5K6pw8PF-rkYDuKdKtVaay_OINg6qFA/exec", {
+    // Log order to Sheet3
+    await fetch(SHEET_API, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, phone, address, pincode, books: bookList, amount, paymentId })
     });
-
-    const text = await sheetRes.text();
-    console.log("📊 Sheet Response:", text); 
-    if (sheetRes.ok) sheetSuccess = true;
   } catch (err) {
     console.log("❌ Sheet Error:", err.message);
   }
@@ -101,39 +107,54 @@ Thank you for your purchase 🙏
   res.json({ success: true, receipt: receiptText });
 });
 
-// 📚 Inventory Management
-app.get("/books", (req, res) => res.json(books));
+// Sheet Inventory Route 
+app.get("/books", async (req, res) => {
+  try {
+    const r = await fetch(SHEET_API + "?type=books");
+    const data = await r.json();
+    const now = Date.now();
 
-app.post("/lock-books", (req, res) => {
-  const { ids } = req.body;
-  books = books.map(b => ids.includes(b.id) ? { ...b, status: "locked", lockedAt: Date.now() } : b);
-  saveBooks();
-  res.json({ success: true });
+    // Auto-unlock calculation based on Sheet timestamps
+    data.forEach(b => {
+      if (b.status === "locked" && b.lockedAt) {
+        if (now - b.lockedAt > 180000) {
+          b.status = "available";
+          b.lockedAt = "";
+        }
+      }
+    });
+
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: "sheet fetch failed" });
+  }
 });
 
-app.post("/unlock-books", (req, res) => {
+app.post("/lock-books", async (req, res) => {
   const { ids } = req.body;
-  books = books.map(b => 
-    ids.includes(b.id) && b.status === "locked" 
-      ? { ...b, status: "available", lockedAt: null } 
-      : b
-  );
-  saveBooks();
-  res.json({ success: true });
-});
-
-// ⏰ Auto-Unlock Expired Locks (3 Minutes)
-setInterval(() => {
-  let changed = false;
-  books = books.map(b => {
-    if (b.status === "locked" && (Date.now() - b.lockedAt > 180000)) {
-      changed = true;
-      return { ...b, status: "available", lockedAt: null };
-    }
-    return b;
+  const updates = ids.map(id => ({ id, status: "locked", lockedAt: Date.now() }));
+  
+  await fetch(SHEET_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "updateBooks", updates })
   });
-  if (changed) saveBooks();
-}, 60000);
+
+  res.json({ success: true });
+});
+
+app.post("/unlock-books", async (req, res) => {
+  const { ids } = req.body;
+  const updates = ids.map(id => ({ id, status: "available", lockedAt: "" }));
+  
+  await fetch(SHEET_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "updateBooks", updates })
+  });
+
+  res.json({ success: true });
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

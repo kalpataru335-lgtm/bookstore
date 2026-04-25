@@ -23,6 +23,7 @@
     <b style="color: #ef4444;">❌ These books are unavailable:</b>
     <div id="unavailableList"></div>
   </div>
+  
   <div class="box">
     <div class="line"><span>Books Total</span><span>₹<span id="total"></span></span></div>
     <div class="line" style="background:rgba(34,197,94,0.15); padding:6px 10px; border-radius:8px; color:#22c55e;">
@@ -30,6 +31,12 @@
     </div>
     <div class="line" style="color:#3b82f6;"><span>Shipping</span><span>₹<span id="shipping"></span></span></div>
     <div class="line final-line"><span>Final Payable</span><span>₹<span id="final"></span></span></div>
+    
+    <div style="font-size:12px; color:#9ca3af; margin-top:15px; border-top: 1px solid #1f2937; padding-top: 10px;">
+      🔒 Secure payments powered by Razorpay<br>
+      🚚 Trusted delivery via India Post<br>
+      📞 Support: Available on WhatsApp
+    </div>
   </div>
 
   <div class="terms-card">
@@ -99,7 +106,6 @@ async function load() {
 async function pay() {
   const payBtn = document.getElementById("payBtn");
   
-  // Issue F Fix: UX Alert for Lock
   if (localStorage.getItem("paymentLock") === "true") {
     alert("Payment already in progress. Please wait.");
     return;
@@ -110,10 +116,10 @@ async function pay() {
     localStorage.removeItem("paymentLock"); alert("Verify selection and terms"); return; 
   }
 
-  payBtn.disabled = true; payBtn.innerText = "Processing...";
+  payBtn.disabled = true; 
+  payBtn.innerText = "Opening Payment...";
 
   try {
-    // Re-verify availability
     const checkRes = await fetch(API + "/books", { cache: "no-store" });
     const latest = await checkRes.json();
     ids = ids.filter(id => { 
@@ -128,7 +134,7 @@ async function pay() {
       return;
     }
 
-    // 🔥 ISSUE A FIX: LOCK BOOKS BEFORE PAYMENT
+    // 🔥 CRITICAL FIX: Lock books before starting payment flow
     await fetch(API + "/lock-books", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: ids })
     });
@@ -152,10 +158,14 @@ async function pay() {
       name: "Sourav Bookstore",
       order_id: data.id,
       handler: async function (response) {
+        payBtn.disabled = true; 
+        payBtn.innerText = "Confirming Order...";
+        
         const user = JSON.parse(localStorage.getItem("userDetails"));
         if (!user || !user.name || !user.phone) {
           alert("User details missing. Please re-enter details.");
           localStorage.removeItem("paymentLock");
+          payBtn.disabled = false; payBtn.innerText = "Pay Now";
           return;
         }
 
@@ -175,20 +185,25 @@ async function pay() {
       },
       modal: {
         ondismiss: async function() { 
-          // 🔥 ISSUE 4 FIX: UNLOCK BOOKS ON CANCEL
+          // Release locks if user cancels
           try {
             await fetch(API + "/unlock-books", {
               method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: ids })
             });
           } catch (e) {}
-          localStorage.removeItem("paymentLock"); payBtn.disabled = false; payBtn.innerText = "Pay Now";
+          localStorage.removeItem("paymentLock"); 
+          payBtn.disabled = false; 
+          payBtn.innerText = "Pay Now";
         }
       },
-      // Issue E Fix: Removed restrictive display blocks for standard UI
       theme: { color: "#22c55e" }
     };
     new Razorpay(options).open();
-  } catch(err) { localStorage.removeItem("paymentLock"); payBtn.disabled = false; payBtn.innerText = "Pay Now"; }
+  } catch(err) { 
+    localStorage.removeItem("paymentLock"); 
+    payBtn.disabled = false; 
+    payBtn.innerText = "Pay Now"; 
+  }
 }
 load();
 </script>
