@@ -57,10 +57,9 @@ async function downloadReceipt() {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
 
-  // 🔥 CLEANUP: Replace unsupported unicode symbols to prevent PDF garbage text
+  // 🔥 CLEANUP (Phase 7A): Only replace symbols that break PDF rendering
   const cleanReceipt = receipt
-    .replace(/₹/g, "Rs.")
-    .replace(/[^\x00-\x7F]/g, ""); 
+    .replace(/₹/g, "Rs.");
 
   const lines = cleanReceipt.split("\n");
 
@@ -83,12 +82,12 @@ async function downloadReceipt() {
 }
 
 function goHome(){
-    // Comprehensive cleanup to prevent ghost locks or stale data on next visit
+    // Phase 7A: Cleanup logic - strictly remove data to prevent ghost selection
     localStorage.removeItem("selectedBooks");
     localStorage.removeItem("shippingCost");
     localStorage.removeItem("bundleApplied");
     localStorage.removeItem("finalReceipt");
-    localStorage.removeItem("paymentLock");
+    // paymentLock removed as per Phase 3/7A standards
     window.location.href = "index.html";
 }
 </script>

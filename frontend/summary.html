@@ -31,6 +31,7 @@
     </div>
     <div class="line" style="color:#3b82f6;"><span>Shipping</span><span>₹<span id="shipping"></span></span></div>
     <div class="line final-line"><span>Final Payable</span><span>₹<span id="final"></span></span></div>
+    <div id="save" style="color:#22c55e; font-size:13px; margin-top:5px;"></div>
     
     <div style="font-size:12px; color:#9ca3af; margin-top:15px; border-top: 1px solid #1f2937; padding-top: 10px;">
       🔒 Secure payments powered by Razorpay<br>
@@ -66,6 +67,9 @@ let shipping = parseInt(localStorage.getItem("shippingCost")) || 0;
 let books = [];
 let calculatedTotal = 0;
 
+// 🟢 STEP 2 — ADD MEMORY-BASED FLAG
+let isPaying = false;
+
 function modify() {
   window.location.href = "index.html"; 
 }
@@ -84,6 +88,15 @@ async function load() {
       } else { unavailable.push(b?.name || "Book"); }
     });
 
+    let mrpTotal = 0;
+
+    ids.forEach(id => {
+      const b = books.find(x => Number(x.id) === Number(id));
+      if (b) {
+        mrpTotal += b.price * 4;
+      }
+    });
+
     ids = ids.filter(id => { const b = books.find(x => x.id === id); return b && b.status === "available"; });
     localStorage.setItem("selectedBooks", JSON.stringify(ids));
 
@@ -99,6 +112,7 @@ async function load() {
     document.getElementById("bundle").innerText = bundleDiscount;
     document.getElementById("shipping").innerText = shipping;
     document.getElementById("final").innerText = calculatedTotal;
+    document.getElementById("save").innerText = `You save ₹${mrpTotal - total}`;
     localStorage.setItem("finalAmount", calculatedTotal);
   } catch(err) { alert("Failed to load summary."); }
 }
@@ -106,18 +120,21 @@ async function load() {
 async function pay() {
   const payBtn = document.getElementById("payBtn");
   
-  if (localStorage.getItem("paymentLock") === "true") {
+  // 🟢 STEP 3 — PREVENT DOUBLE CLICK
+  if (isPaying) {
     alert("Payment already in progress. Please wait.");
     return;
   }
-  localStorage.setItem("paymentLock", "true");
 
-  if(!ids || ids.length === 0 || !document.getElementById("terms").checked) { 
-    localStorage.removeItem("paymentLock"); alert("Verify selection and terms"); return; 
+  // 🟢 STEP 3 — TERMS CHECK
+  const terms = document.getElementById("terms");
+  if(!ids || ids.length === 0 || !terms.checked) { 
+    alert("Please agree to Terms & Conditions"); return; 
   }
 
+  isPaying = true;
   payBtn.disabled = true; 
-  payBtn.innerText = "Opening Payment...";
+  payBtn.innerText = "Processing...";
 
   try {
     const checkRes = await fetch(API + "/books", { cache: "no-store" });
@@ -129,7 +146,7 @@ async function pay() {
 
     if(ids.length === 0) {
       alert("Books are no longer available.");
-      localStorage.removeItem("paymentLock");
+      isPaying = false; // ✅ reset on failure
       window.location.href = "index.html";
       return;
     }
@@ -146,7 +163,7 @@ async function pay() {
 
     if (!data || !data.id) {
       alert("Order creation failed. Try again.");
-      localStorage.removeItem("paymentLock");
+      isPaying = false; // ✅ reset on failure
       payBtn.disabled = false; payBtn.innerText = "Pay Now";
       return;
     }
@@ -158,29 +175,34 @@ async function pay() {
       name: "Sourav Bookstore",
       order_id: data.id,
       handler: async function (response) {
+        isPaying = false; // ✅ reset on success
         payBtn.disabled = true; 
         payBtn.innerText = "Confirming Order...";
         
         const user = JSON.parse(localStorage.getItem("userDetails"));
         if (!user || !user.name || !user.phone) {
           alert("User details missing. Please re-enter details.");
-          localStorage.removeItem("paymentLock");
           payBtn.disabled = false; payBtn.innerText = "Pay Now";
           return;
         }
 
-        const res = await fetch(API + "/confirm-order", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ids, paymentId: response.razorpay_payment_id, amount: calculatedTotal,
-            name: user.name, phone: user.phone, address: user.address, pincode: user.pincode
-          })
-        });
-        const confirmData = await res.json();
-        if (confirmData.success) {
-          localStorage.setItem("finalReceipt", confirmData.receipt);
-          localStorage.removeItem("paymentLock");
-          window.location.href = "thankyou.html";
+        // 🟢 STEP 4 — PROTECT CONFIRM ORDER
+        try {
+          const res = await fetch(API + "/confirm-order", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ids, paymentId: response.razorpay_payment_id, amount: calculatedTotal,
+              name: user.name, phone: user.phone, address: user.address, pincode: user.pincode
+            })
+          });
+          const confirmData = await res.json();
+          if (confirmData.success) {
+            localStorage.setItem("finalReceipt", confirmData.receipt);
+            window.location.href = "thankyou.html";
+          }
+        } catch (err) {
+          alert("Order confirmation failed. Contact support.");
+          payBtn.disabled = false; payBtn.innerText = "Pay Now";
         }
       },
       modal: {
@@ -191,7 +213,7 @@ async function pay() {
               method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: ids })
             });
           } catch (e) {}
-          localStorage.removeItem("paymentLock"); 
+          isPaying = false; // ✅ reset on cancel
           payBtn.disabled = false; 
           payBtn.innerText = "Pay Now";
         }
@@ -200,12 +222,18 @@ async function pay() {
     };
     new Razorpay(options).open();
   } catch(err) { 
-    localStorage.removeItem("paymentLock"); 
+    isPaying = false; // ✅ reset on failure
     payBtn.disabled = false; 
     payBtn.innerText = "Pay Now"; 
+    alert("Payment failed. Try again.");
   }
 }
 load();
+
+// 🟢 STEP 6 — HANDLE PAGE RELOAD SAFELY
+window.addEventListener("beforeunload", () => {
+  isPaying = false;
+});
 </script>
 </body>
 </html>

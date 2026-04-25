@@ -15,7 +15,7 @@ body{
   background:#0f172a;
   color:#e5e7eb;
 
-  /* 🔥 CRITICAL (fix bottom cut) */
+  /* 🔥 CRITICAL: Prevent bottom bar from cutting off content */
   padding-bottom:160px;
 }
 
@@ -94,6 +94,11 @@ body{
   cursor:pointer;
   transition:0.2s;
   box-shadow:0 4px 12px rgba(0,0,0,0.2);
+  /* Phase 4: Fixed Card Sizing */
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 .card:hover{
@@ -110,20 +115,18 @@ body{
   cursor:not-allowed;
 }
 
-/* ===== PRICE ===== */
+/* ===== PRICE & UI ELEMENTS ===== */
 .price{
   font-size:15px;
   font-weight:bold;
 }
 
-/* ===== STRIKE ===== */
 .strike{
   text-decoration:line-through;
   color:#9ca3af;
   font-size:12px;
 }
 
-/* ===== HIGHLIGHT ===== */
 .highlight{
   background:#fde047;
   color:black;
@@ -185,7 +188,7 @@ body{
   min-width:120px;
 }
 
-/* ===== INPUT ===== */
+/* ===== INPUTS ===== */
 input{
   width:100%;
   padding:12px;
@@ -196,33 +199,21 @@ input{
   color:white;
 }
 
-/* ===== INFO BOX ===== */
-.info-box{
-  background:#1e293b;
-  padding:12px;
-  border-radius:10px;
-}
-
 /* ===== DESKTOP VIEW ===== */
 @media (min-width:768px){
-
   #books{
     grid-template-columns:repeat(4,1fr);
     padding:20px 80px;
   }
-
   .action-buttons{
     padding:20px 80px;
   }
-
   .header{
     padding:25px;
   }
-
   .header h1{
     font-size:26px;
   }
-
   .bottom-bar{
     padding:15px 80px;
   }

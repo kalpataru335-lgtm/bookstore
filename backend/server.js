@@ -5,6 +5,70 @@ import cors from "cors";
 import Razorpay from "razorpay";
 import fetch from "node-fetch";
 
+// 🟢 HYBRID CACHE (Phase 1)
+let booksCache = [];
+let lastFetchTime = 0;
+const CACHE_TTL = 10000; // 10 seconds
+
+async function fetchBooksFromSheet() {
+  try {
+    const r = await fetch(SHEET_API + "?type=books");
+    const data = await r.json();
+
+    booksCache = data;
+    lastFetchTime = Date.now();
+
+    console.log("✅ Cache refreshed from sheet");
+  } catch (err) {
+    console.log("❌ Sheet fetch failed:", err.message);
+  }
+}
+
+async function safeSheetUpdate(payload, retries = 2) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const res = await fetch(SHEET_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      const text = await res.text();
+
+      if (res.ok && text.includes("SUCCESS")) {
+        console.log("✅ Sheet update success");
+        return true;
+      }
+
+      throw new Error("Invalid response: " + text);
+
+    } catch (err) {
+      console.log(`❌ Sheet attempt ${i + 1} failed:`, err.message);
+
+      if (i === retries) {
+        console.log("🚨 FINAL FAILURE: Sheet update failed");
+        return false;
+      }
+
+      // wait before retry
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+}
+
+function processLocks(data) {
+  const now = Date.now();
+
+  return data.map(b => {
+    if (b.status === "locked" && b.lockedAt) {
+      if (now - b.lockedAt > 180000) {
+        return { ...b, status: "available", lockedAt: "" };
+      }
+    }
+    return b;
+  });
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -34,34 +98,51 @@ app.post("/create-order", async (req, res) => {
 });
 
 app.post("/confirm-order", async (req, res) => {
-  // 🔒 CRITICAL FIX 2: Removed amount from req.body to prevent manipulation
   const { ids, paymentId, name, phone, address, pincode } = req.body;
   if (!ids || ids.length === 0) return res.status(400).json({ error: "Invalid order" });
 
-  // 🔒 CRITICAL FIX 2: Recalculate amount directly from the authoritative sheet
-  const r = await fetch(SHEET_API + "?type=books");
-  const currentBooks = await r.json();
+  // ❌ Prevent buying already sold/locked by others (🟢 FIX 1: TYPE MISMATCH)
+  const invalid = booksCache.filter(b =>
+    ids.map(Number).includes(Number(b.id)) && b.status !== "locked"
+  );
+
+  if (invalid.length > 0) {
+    return res.status(400).json({
+      error: "Some books are no longer available"
+    });
+  }
+
+  // 🟢 FIX 2: REMOVE EXTRA SHEET FETCH (Use Cache)
+  const currentBooks = booksCache;
 
   let total = 0;
   ids.forEach(id => {
-    // 🔒 CRITICAL FIX 1: Strict Type matching
     const b = currentBooks.find(x => Number(x.id) === Number(id));
     if (b) total += Number(b.price);
   });
 
   const amount = total; // Securely calculated backend amount
 
+  console.log("📦 Order received:", {
+    name,
+    phone,
+    amount,
+    paymentId
+  });
+
   // Update Sold status via Sheet 
   const updates = ids.map(id => ({ id, status: "sold", lockedAt: "" }));
   
-  // 🔒 CRITICAL FIX 3: Added Headers to prevent silent JSON parse failures
-  await fetch(SHEET_API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: "updateBooks", updates })
-  });
+  // 🟢 Update cache instantly (🟢 FIX 1: TYPE MISMATCH)
+  booksCache = booksCache.map(b =>
+    ids.map(Number).includes(Number(b.id))
+      ? { ...b, status: "sold", lockedAt: "" }
+      : b
+  );
 
-  const bookList = currentBooks.filter(b => ids.includes(b.id)).map(b => b.name).join("\n• ");
+  await safeSheetUpdate({ type: "updateBooks", updates });
+
+  const bookList = currentBooks.filter(b => ids.map(Number).includes(Number(b.id))).map(b => b.name).join("\n• ");
 
   const receiptText = `
 ====================================
@@ -87,21 +168,25 @@ Address: ${address}, ${pincode}
 
 ------------------------------------
 ✔ Order Confirmed
-✔ Delivery in 4–7 days
+✔ Delivery date will be updated soon
 
 Thank you for your purchase!
 ====================================
 `;
 
-  try {
-    // Log order to Sheet3
-    await fetch(SHEET_API, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, phone, address, pincode, books: bookList, amount, paymentId })
-    });
-  } catch (err) {
-    console.log("❌ Sheet Error:", err.message);
+  // Log order to Sheet3
+  const saved = await safeSheetUpdate({
+    name,
+    phone,
+    address,
+    pincode,
+    books: bookList,
+    amount,
+    paymentId
+  });
+
+  if (!saved) {
+    console.log("⚠️ Order saved failed — manual check needed");
   }
 
   res.json({ success: true, receipt: receiptText });
@@ -110,34 +195,55 @@ Thank you for your purchase!
 // Sheet Inventory Route 
 app.get("/books", async (req, res) => {
   try {
-    const r = await fetch(SHEET_API + "?type=books");
-    const data = await r.json();
     const now = Date.now();
 
-    // Auto-unlock calculation based on Sheet timestamps
-    data.forEach(b => {
-      if (b.status === "locked" && b.lockedAt) {
-        if (now - b.lockedAt > 180000) {
-          b.status = "available";
-          b.lockedAt = "";
-        }
-      }
-    });
+    // 🟢 If cache empty OR expired → refresh
+    if (!booksCache.length || (now - lastFetchTime > CACHE_TTL)) {
+      await fetchBooksFromSheet();
+    }
 
-    res.json(data);
+    // 🟢 Auto-unlock in cache
+    booksCache = processLocks(booksCache);
+
+    res.json(booksCache);
   } catch (e) {
-    res.status(500).json({ error: "sheet fetch failed" });
+    res.status(500).json({ error: "cache fetch failed" });
   }
 });
 
 app.post("/lock-books", async (req, res) => {
   const { ids } = req.body;
-  const updates = ids.map(id => ({ id, status: "locked", lockedAt: Date.now() }));
-  
-  await fetch(SHEET_API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: "updateBooks", updates })
+
+  // ❌ Prevent locking already locked/sold books (🟢 FIX 1: TYPE MISMATCH)
+  const invalid = booksCache.filter(b =>
+    ids.map(Number).includes(Number(b.id)) && b.status !== "available"
+  );
+
+  if (invalid.length > 0) {
+    return res.json({
+      success: false,
+      message: "Some books already locked or sold"
+    });
+  }
+
+  // 🟢 FIX 3: LOCK TIMESTAMP CONSISTENCY
+  const now = Date.now();
+
+  // 🟢 Update cache instantly (🟢 FIX 1: TYPE MISMATCH)
+  booksCache = booksCache.map(b =>
+    ids.map(Number).includes(Number(b.id))
+      ? { ...b, status: "locked", lockedAt: now }
+      : b
+  );
+
+  // 🟢 Async update to sheet
+  safeSheetUpdate({
+    type: "updateBooks",
+    updates: ids.map(id => ({
+      id,
+      status: "locked",
+      lockedAt: now
+    }))
   });
 
   res.json({ success: true });
@@ -145,12 +251,22 @@ app.post("/lock-books", async (req, res) => {
 
 app.post("/unlock-books", async (req, res) => {
   const { ids } = req.body;
-  const updates = ids.map(id => ({ id, status: "available", lockedAt: "" }));
-  
-  await fetch(SHEET_API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: "updateBooks", updates })
+
+  // 🟢 Update cache instantly (🟢 FIX 1: TYPE MISMATCH)
+  booksCache = booksCache.map(b =>
+    ids.map(Number).includes(Number(b.id))
+      ? { ...b, status: "available", lockedAt: "" }
+      : b
+  );
+
+  // 🟢 Async sheet update
+  safeSheetUpdate({
+    type: "updateBooks",
+    updates: ids.map(id => ({
+      id,
+      status: "available",
+      lockedAt: ""
+    }))
   });
 
   res.json({ success: true });
@@ -158,3 +274,33 @@ app.post("/unlock-books", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+async function syncExpiredLocks() {
+  const now = Date.now();
+
+  const expired = booksCache.filter(b =>
+    b.status === "locked" &&
+    b.lockedAt &&
+    (now - b.lockedAt > 180000)
+  );
+
+  if (expired.length === 0) return;
+
+  await safeSheetUpdate({
+    type: "updateBooks",
+    updates: expired.map(b => ({
+      id: b.id,
+      status: "available",
+      lockedAt: ""
+    }))
+  });
+
+  console.log("🔄 Synced expired locks to sheet");
+}
+
+// 🟢 Background sync every 15 sec
+setInterval(async () => {
+  await fetchBooksFromSheet();
+  booksCache = processLocks(booksCache);
+  await syncExpiredLocks();
+}, 15000);

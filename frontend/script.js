@@ -3,12 +3,25 @@ let selected = JSON.parse(localStorage.getItem("selectedBooks")) || [];
 // Enforce numeric types from storage
 selected = selected.map(Number);
 let booksData = [];
+const CACHE_KEY = "booksCache";
 
 // Clear any stale bundle state on load
 localStorage.setItem("bundleApplied", "false");
 
 async function loadBooks() {
   const container = document.getElementById("books");
+
+  // 🟢 Load from local cache instantly (Phase 7A fix)
+  const cached = localStorage.getItem(CACHE_KEY);
+  if (cached) {
+    const parsed = JSON.parse(cached);
+    // 🟢 Cache expiry check: 15 seconds
+    if (Date.now() - parsed.time < 15000) {
+      booksData = parsed.data;
+      renderBooks(booksData);
+    }
+  }
+
   try {
     const res = await fetch(API + "/books", { cache: "no-store" });
     const data = await res.json();
@@ -16,15 +29,23 @@ async function loadBooks() {
     
     // Auto-clean selection: Remove items that were sold/locked by others
     selected = selected.filter(id => {
-      // 🔒 CRITICAL FIX 1: Strict Type matching
+      // 🔒 CRITICAL FIX: Strict Type matching
       const b = data.find(x => Number(x.id) === Number(id));
       return b && b.status === "available";
     });
     localStorage.setItem("selectedBooks", JSON.stringify(selected));
 
+    // 🟢 Save to cache with timestamp
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      data: data,
+      time: Date.now()
+    }));
+
     renderBooks(data);
   } catch (err) {
-    container.innerHTML = "❌ Connection failed. <button onclick='loadBooks()'>Retry</button>";
+    if (!booksData.length) {
+      container.innerHTML = "❌ Connection failed. <button onclick='loadBooks()'>Retry</button>";
+    }
   }
 }
 
@@ -34,41 +55,50 @@ function renderBooks(books) {
   
   books.forEach(b => {
     const card = document.createElement("div");
-    
-    // Locked Card with Live Timer
+    const mrp = b.price * 4; // Phase 4: UI Restoration logic
+
+    let highlight = "";
+    if (b.name.toLowerCase().includes("lilamrit")) {
+      highlight = `<div class="highlight">7 Vol Set • Sealed (Vol 1 open)</div>`;
+    }
+
     if (b.status === "locked") {
-      card.className = "card locked";
-      
       let remaining = 180 - Math.floor((Date.now() - b.lockedAt) / 1000);
       if (remaining < 0) remaining = 0;
 
+      card.className = "card locked";
       card.innerHTML = `
+        ${highlight}
         <b>${b.name}</b>
+        <div class="strike">₹${mrp}</div>
         <div class="price">₹${b.price}</div>
-        <small style="color:#facc15; display:block; margin-top:6px;">
-          ⏳ LOCKED (${remaining}s)
-        </small>
+        <small style="color:#facc15;">⏳ LOCKED (${remaining}s)</small>
       `;
+
     } else if (b.status === "sold") {
-      // 🟡 MINOR FIX 2: Explicitly show SOLD UI
-      card.className = "card sold";
-      // 🔒 CRITICAL FIX 1: Strict Type matching
-      if (selected.includes(Number(b.id))) card.classList.add("selected");
-      
+      card.className = "card locked";
       card.innerHTML = `
+        ${highlight}
         <b>${b.name}</b>
+        <div class="strike">₹${mrp}</div>
         <div class="price">₹${b.price}</div>
-        <small style="color:#ef4444; display:block; margin-top:6px;">❌ SOLD</small>
+        <small style="color:#ef4444;">❌ SOLD</small>
       `;
+
     } else {
-      // Available Card
       card.className = "card";
-      // 🔒 CRITICAL FIX 1: Strict Type matching
       if (selected.includes(Number(b.id))) card.classList.add("selected");
-      
-      card.innerHTML = `<b>${b.name}</b><div class="price">₹${b.price}</div>`;
-      card.onclick = () => toggleSelection(b.id);
+
+      card.innerHTML = `
+        ${highlight}
+        <b>${b.name}</b>
+        <div class="strike">₹${mrp}</div>
+        <div class="price">₹${b.price}</div>
+      `;
+
+      card.onclick = () => toggleSelection(Number(b.id));
     }
+    
     container.appendChild(card);
   });
   
@@ -87,7 +117,6 @@ function updateTotal() {
   let total = 0;
 
   selected.forEach(id => {
-    // 🔒 CRITICAL FIX 1: Strict Type matching
     const b = booksData.find(x => Number(x.id) === Number(id));
     if (b) rawTotal += Number(b.price);
   });
@@ -115,17 +144,7 @@ function updateTotal() {
 }
 
 function goNext() {
-  let rawTotal = 0;
-  selected.forEach(id => {
-    // 🔒 CRITICAL FIX 1: Strict Type matching
-    const b = booksData.find(x => Number(x.id) === Number(id));
-    if (b) rawTotal += Number(b.price);
-  });
-  
-  if (rawTotal < 160) {
-    alert("Minimum ₹160 required"); 
-    return;
-  }
+  // Phase 7A: Navigation speed fix - remove redundant checks
   window.location.href = "details.html";
 }
 
