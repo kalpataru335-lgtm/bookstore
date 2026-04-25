@@ -185,12 +185,27 @@ async function pay() {
         }
       },
       modal: {
-        ondismiss: async function() {
+        ondismiss: async function () {
+          console.log("Payment cancelled by user");
+
+          // 🔓 Try unlocking books safely
+          try {
+            await fetch("https://bookstore-backend-971c.onrender.com/unlock-books", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ids: ids })
+            });
+          } catch (e) {
+            console.log("Unlock failed (non-critical)");
+          }
+
+          // 🔁 Reset UI safely
           window.paymentStarted = false;
-          payBtn.disabled = false; payBtn.innerText = "Pay Now";
-          await fetch("https://bookstore-backend-971c.onrender.com/unlock-books", { 
-            method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ ids: ids }) 
-          });
+          payBtn.disabled = false;
+          payBtn.innerText = "Pay Now";
+
+          // 🧠 Friendly message (NOT error)
+          alert("Payment cancelled. You can try again.");
         }
       }
     });
