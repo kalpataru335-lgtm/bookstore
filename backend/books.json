@@ -16,7 +16,7 @@
   { "id": 15, "name": "Life Comes From Life", "price": 20, "weight": 0.3, "status": "available" },
   { "id": 16, "name": "Easy Journey to Other Planets", "price": 12, "weight": 0.2, "status": "available" },
   { "id": 17, "name": "Civilization and Transcendence", "price": 12, "weight": 0.2, "status": "available" },
-  { "id": 18, "name": "The Nectar of Instruction", price: 12, weight: 0.2, status: "available" },
+  { "id": 18, "name": "The Nectar of Instruction", "price": 12, "weight": 0.2, "status": "available" },
   { "id": 19, "name": "The Hare Krishna Challenge", "price": 12, "weight": 0.2, "status": "available" },
   { "id": 20, "name": "Raja Vidya: King of Knowledge", "price": 12, "weight": 0.2, "status": "available" },
   { "id": 21, "name": "Consciousness: The Missing Link", "price": 12, "weight": 0.2, "status": "available" },
