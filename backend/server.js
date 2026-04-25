@@ -10,6 +10,7 @@ app.use(cors());
 app.use(express.json());
 
 const orders = [];
+// 🔐 Phase 1 Patch: Credentials moved to environment variables
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET
@@ -83,27 +84,34 @@ Thank you for your purchase 🙏
 
   orders.push({ id: Date.now(), books: bookList, paymentId, name, phone, address, pincode, amount, time: new Date() });
 
+  // 📊 Phase 3 Patch: Reliable Google Sheet Logging with text responses
   let sheetSuccess = false;
   try {
+    console.log("📡 Sending data to Google Sheet...");
     const sheetRes = await fetch("https://script.google.com/macros/s/AKfycbysaH5JHd7DIl5t-2zurPEaqOHuxE-E8Af-n5K6pw8PF-rkYDuKdKtVaay_OINg6qFA/exec", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, phone, address, pincode, books: bookList, amount, paymentId })
     });
     const text = await sheetRes.text();
-    if (sheetRes.ok) sheetSuccess = true;
     console.log("📊 Sheet Response:", text);
+    if (sheetRes.ok) sheetSuccess = true;
   } catch (err) { console.log("❌ Sheet Error:", err.message); }
+
+  if (!sheetSuccess) console.log("⚠️ WARNING: Order not saved to sheet!");
 
   res.json({ success: true, receipt: receiptText });
 });
 
 app.get("/books", (req, res) => res.json(books));
+app.get("/orders", (req, res) => res.json(orders));
+
 app.post("/lock-books", (req, res) => {
   const { ids } = req.body;
   books = books.map(b => ids.includes(b.id) ? { ...b, status: "locked", lockedAt: Date.now() } : b);
   res.json({ success: true });
 });
+
 app.post("/unlock-books", (req, res) => {
   const { ids } = req.body;
   books = books.map(b => ids.includes(b.id) && b.status === "locked" ? { ...b, status: "available", lockedAt: null } : b);
