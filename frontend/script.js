@@ -11,11 +11,10 @@ localStorage.setItem("bundleApplied", "false");
 async function loadBooks() {
   const container = document.getElementById("books");
 
-  // 🟢 Load from local cache instantly (Phase 7A fix)
+  // 🟢 PHASE 7A FIX: Load from local cache with 15s expiry check
   const cached = localStorage.getItem(CACHE_KEY);
   if (cached) {
     const parsed = JSON.parse(cached);
-    // 🟢 Cache expiry check: 15 seconds
     if (Date.now() - parsed.time < 15000) {
       booksData = parsed.data;
       renderBooks(booksData);
@@ -55,7 +54,8 @@ function renderBooks(books) {
   
   books.forEach(b => {
     const card = document.createElement("div");
-    const mrp = b.price * 4; // Phase 4: UI Restoration logic
+    
+    const mrp = b.price * 4; // Phase 4 UI logic
 
     let highlight = "";
     if (b.name.toLowerCase().includes("lilamrit")) {
@@ -117,6 +117,7 @@ function updateTotal() {
   let total = 0;
 
   selected.forEach(id => {
+    // 🔒 CRITICAL FIX: Strict Type matching
     const b = booksData.find(x => Number(x.id) === Number(id));
     if (b) rawTotal += Number(b.price);
   });
@@ -144,7 +145,7 @@ function updateTotal() {
 }
 
 function goNext() {
-  // Phase 7A: Navigation speed fix - remove redundant checks
+  // 🟢 PHASE 7A FIX: Removed redundant checks for faster navigation
   window.location.href = "details.html";
 }
 

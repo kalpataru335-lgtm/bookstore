@@ -5,7 +5,7 @@ import cors from "cors";
 import Razorpay from "razorpay";
 import fetch from "node-fetch";
 
-// 🟢 HYBRID CACHE (Phase 1)
+// 🟢 HYBRID CACHE
 let booksCache = [];
 let lastFetchTime = 0;
 const CACHE_TTL = 10000; // 10 seconds
@@ -50,7 +50,6 @@ async function safeSheetUpdate(payload, retries = 2) {
         return false;
       }
 
-      // wait before retry
       await new Promise(r => setTimeout(r, 500));
     }
   }
@@ -58,7 +57,6 @@ async function safeSheetUpdate(payload, retries = 2) {
 
 function processLocks(data) {
   const now = Date.now();
-
   return data.map(b => {
     if (b.status === "locked" && b.lockedAt) {
       if (now - b.lockedAt > 180000) {
@@ -73,10 +71,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔴 REPLACE WITH YOUR NEW DEPLOYED APP SCRIPT URL
 const SHEET_API = "https://script.google.com/macros/s/AKfycbysaH5JHd7DIl5t-2zurPEaqOHuxE-E8Af-n5K6pw8PF-rkYDuKdKtVaay_OINg6qFA/exec"; 
 
-const orders = [];
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET
@@ -101,18 +97,16 @@ app.post("/confirm-order", async (req, res) => {
   const { ids, paymentId, name, phone, address, pincode } = req.body;
   if (!ids || ids.length === 0) return res.status(400).json({ error: "Invalid order" });
 
-  // ❌ Prevent buying already sold/locked by others (🟢 FIX 1: TYPE MISMATCH)
+  // 🟢 FIX 1: TYPE MISMATCH CHECK
   const invalid = booksCache.filter(b =>
     ids.map(Number).includes(Number(b.id)) && b.status !== "locked"
   );
 
   if (invalid.length > 0) {
-    return res.status(400).json({
-      error: "Some books are no longer available"
-    });
+    return res.status(400).json({ error: "Some books are no longer available" });
   }
 
-  // 🟢 FIX 2: REMOVE EXTRA SHEET FETCH (Use Cache)
+  // 🟢 FIX 2: USE CACHE (No extra sheet fetch)
   const currentBooks = booksCache;
 
   let total = 0;
@@ -121,25 +115,17 @@ app.post("/confirm-order", async (req, res) => {
     if (b) total += Number(b.price);
   });
 
-  const amount = total; // Securely calculated backend amount
+  const amount = total; 
 
-  console.log("📦 Order received:", {
-    name,
-    phone,
-    amount,
-    paymentId
-  });
-
-  // Update Sold status via Sheet 
-  const updates = ids.map(id => ({ id, status: "sold", lockedAt: "" }));
-  
-  // 🟢 Update cache instantly (🟢 FIX 1: TYPE MISMATCH)
+  // Update Sold status in Cache instantly
   booksCache = booksCache.map(b =>
     ids.map(Number).includes(Number(b.id))
       ? { ...b, status: "sold", lockedAt: "" }
       : b
   );
 
+  // Update Sheet2 (Inventory)
+  const updates = ids.map(id => ({ id, status: "sold", lockedAt: "" }));
   await safeSheetUpdate({ type: "updateBooks", updates });
 
   const bookList = currentBooks.filter(b => ids.map(Number).includes(Number(b.id))).map(b => b.name).join("\n• ");
@@ -174,8 +160,9 @@ Thank you for your purchase!
 ====================================
 `;
 
-  // Log order to Sheet3
+  // 🟢 FIX 2: SHEET1 UPDATE (Explicit "order" type)
   const saved = await safeSheetUpdate({
+    type: "order", 
     name,
     phone,
     address,
@@ -185,26 +172,18 @@ Thank you for your purchase!
     paymentId
   });
 
-  if (!saved) {
-    console.log("⚠️ Order saved failed — manual check needed");
-  }
+  if (!saved) console.log("⚠️ Order log to Sheet1 failed");
 
   res.json({ success: true, receipt: receiptText });
 });
 
-// Sheet Inventory Route 
 app.get("/books", async (req, res) => {
   try {
     const now = Date.now();
-
-    // 🟢 If cache empty OR expired → refresh
     if (!booksCache.length || (now - lastFetchTime > CACHE_TTL)) {
       await fetchBooksFromSheet();
     }
-
-    // 🟢 Auto-unlock in cache
     booksCache = processLocks(booksCache);
-
     res.json(booksCache);
   } catch (e) {
     res.status(500).json({ error: "cache fetch failed" });
@@ -213,37 +192,26 @@ app.get("/books", async (req, res) => {
 
 app.post("/lock-books", async (req, res) => {
   const { ids } = req.body;
-
-  // ❌ Prevent locking already locked/sold books (🟢 FIX 1: TYPE MISMATCH)
   const invalid = booksCache.filter(b =>
     ids.map(Number).includes(Number(b.id)) && b.status !== "available"
   );
 
   if (invalid.length > 0) {
-    return res.json({
-      success: false,
-      message: "Some books already locked or sold"
-    });
+    return res.json({ success: false, message: "Books unavailable" });
   }
 
-  // 🟢 FIX 3: LOCK TIMESTAMP CONSISTENCY
+  // 🟢 FIX 3: CONSISTENT TIMESTAMP
   const now = Date.now();
 
-  // 🟢 Update cache instantly (🟢 FIX 1: TYPE MISMATCH)
   booksCache = booksCache.map(b =>
     ids.map(Number).includes(Number(b.id))
       ? { ...b, status: "locked", lockedAt: now }
       : b
   );
 
-  // 🟢 Async update to sheet
   safeSheetUpdate({
     type: "updateBooks",
-    updates: ids.map(id => ({
-      id,
-      status: "locked",
-      lockedAt: now
-    }))
+    updates: ids.map(id => ({ id, status: "locked", lockedAt: now }))
   });
 
   res.json({ success: true });
@@ -252,21 +220,15 @@ app.post("/lock-books", async (req, res) => {
 app.post("/unlock-books", async (req, res) => {
   const { ids } = req.body;
 
-  // 🟢 Update cache instantly (🟢 FIX 1: TYPE MISMATCH)
   booksCache = booksCache.map(b =>
     ids.map(Number).includes(Number(b.id))
       ? { ...b, status: "available", lockedAt: "" }
       : b
   );
 
-  // 🟢 Async sheet update
   safeSheetUpdate({
     type: "updateBooks",
-    updates: ids.map(id => ({
-      id,
-      status: "available",
-      lockedAt: ""
-    }))
+    updates: ids.map(id => ({ id, status: "available", lockedAt: "" }))
   });
 
   res.json({ success: true });
@@ -277,28 +239,17 @@ app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
 async function syncExpiredLocks() {
   const now = Date.now();
-
   const expired = booksCache.filter(b =>
-    b.status === "locked" &&
-    b.lockedAt &&
-    (now - b.lockedAt > 180000)
+    b.status === "locked" && b.lockedAt && (now - b.lockedAt > 180000)
   );
-
   if (expired.length === 0) return;
 
   await safeSheetUpdate({
     type: "updateBooks",
-    updates: expired.map(b => ({
-      id: b.id,
-      status: "available",
-      lockedAt: ""
-    }))
+    updates: expired.map(b => ({ id: b.id, status: "available", lockedAt: "" }))
   });
-
-  console.log("🔄 Synced expired locks to sheet");
 }
 
-// 🟢 Background sync every 15 sec
 setInterval(async () => {
   await fetchBooksFromSheet();
   booksCache = processLocks(booksCache);

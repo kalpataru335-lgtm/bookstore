@@ -151,6 +151,7 @@ async function load(){
 
     let weight = 0;
     selected.forEach(id=>{
+      // 🔒 CRITICAL FIX: Strict Type matching
       const b = books.find(x=> Number(x.id) === Number(id));
       if(b) weight += b.weight;
     });
@@ -277,6 +278,7 @@ async function goNext(){
 
   let removed = [];
   selected = selected.filter(id=>{
+    // 🔒 CRITICAL FIX: Strict Type matching
     const b = latest.find(x=> Number(x.id) === Number(id));
     if(!b || b.status !== "available"){ 
       removed.push(b?.name || "Book"); 

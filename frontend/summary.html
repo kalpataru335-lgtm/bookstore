@@ -67,7 +67,6 @@ let shipping = parseInt(localStorage.getItem("shippingCost")) || 0;
 let books = [];
 let calculatedTotal = 0;
 
-// 🟢 STEP 2 — ADD MEMORY-BASED FLAG
 let isPaying = false;
 
 function modify() {
@@ -82,22 +81,22 @@ async function load() {
     let total=0, html="", unavailable = [];
 
     ids.forEach(id => {
-      const b = books.find(x => x.id === id);
+      const b = books.find(x => Number(x.id) === Number(id));
       if(b && b.status === "available") { 
         total += b.price; html += `<div class="line"><span>${b.name}</span><span>₹${b.price}</span></div>`; 
       } else { unavailable.push(b?.name || "Book"); }
     });
 
     let mrpTotal = 0;
-
     ids.forEach(id => {
       const b = books.find(x => Number(x.id) === Number(id));
-      if (b) {
-        mrpTotal += b.price * 4;
-      }
+      if (b) mrpTotal += b.price * 4;
     });
 
-    ids = ids.filter(id => { const b = books.find(x => x.id === id); return b && b.status === "available"; });
+    ids = ids.filter(id => { 
+      const b = books.find(x => Number(x.id) === Number(id)); 
+      return b && b.status === "available"; 
+    });
     localStorage.setItem("selectedBooks", JSON.stringify(ids));
 
     const availableCount = books.filter(b => b.status === "available").length;
@@ -120,13 +119,8 @@ async function load() {
 async function pay() {
   const payBtn = document.getElementById("payBtn");
   
-  // 🟢 STEP 3 — PREVENT DOUBLE CLICK
-  if (isPaying) {
-    alert("Payment already in progress. Please wait.");
-    return;
-  }
+  if (isPaying) return;
 
-  // 🟢 STEP 3 — TERMS CHECK
   const terms = document.getElementById("terms");
   if(!ids || ids.length === 0 || !terms.checked) { 
     alert("Please agree to Terms & Conditions"); return; 
@@ -140,18 +134,17 @@ async function pay() {
     const checkRes = await fetch(API + "/books", { cache: "no-store" });
     const latest = await checkRes.json();
     ids = ids.filter(id => { 
-      const b = latest.find(x => x.id === id); 
+      const b = latest.find(x => Number(x.id) === Number(id)); 
       return b && b.status === "available";
     });
 
     if(ids.length === 0) {
       alert("Books are no longer available.");
-      isPaying = false; // ✅ reset on failure
+      isPaying = false;
       window.location.href = "index.html";
       return;
     }
 
-    // 🔥 CRITICAL FIX: Lock books before starting payment flow
     await fetch(API + "/lock-books", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: ids })
     });
@@ -163,7 +156,7 @@ async function pay() {
 
     if (!data || !data.id) {
       alert("Order creation failed. Try again.");
-      isPaying = false; // ✅ reset on failure
+      isPaying = false;
       payBtn.disabled = false; payBtn.innerText = "Pay Now";
       return;
     }
@@ -175,45 +168,28 @@ async function pay() {
       name: "Sourav Bookstore",
       order_id: data.id,
       handler: async function (response) {
-        isPaying = false; // ✅ reset on success
-        payBtn.disabled = true; 
         payBtn.innerText = "Confirming Order...";
         
         const user = JSON.parse(localStorage.getItem("userDetails"));
-        if (!user || !user.name || !user.phone) {
-          alert("User details missing. Please re-enter details.");
-          payBtn.disabled = false; payBtn.innerText = "Pay Now";
-          return;
-        }
-
-        // 🟢 STEP 4 — PROTECT CONFIRM ORDER
-        try {
-          const res = await fetch(API + "/confirm-order", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              ids, paymentId: response.razorpay_payment_id, amount: calculatedTotal,
-              name: user.name, phone: user.phone, address: user.address, pincode: user.pincode
-            })
-          });
-          const confirmData = await res.json();
-          if (confirmData.success) {
-            localStorage.setItem("finalReceipt", confirmData.receipt);
-            window.location.href = "thankyou.html";
-          }
-        } catch (err) {
-          alert("Order confirmation failed. Contact support.");
-          payBtn.disabled = false; payBtn.innerText = "Pay Now";
+        const res = await fetch(API + "/confirm-order", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ids, paymentId: response.razorpay_payment_id,
+            name: user.name, phone: user.phone, address: user.address, pincode: user.pincode
+          })
+        });
+        const confirmData = await res.json();
+        if (confirmData.success) {
+          localStorage.setItem("finalReceipt", confirmData.receipt);
+          window.location.href = "thankyou.html";
         }
       },
       modal: {
         ondismiss: async function() { 
-          // Release locks if user cancels
-          try {
-            await fetch(API + "/unlock-books", {
-              method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: ids })
-            });
-          } catch (e) {}
-          isPaying = false; // ✅ reset on cancel
+          await fetch(API + "/unlock-books", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: ids })
+          });
+          isPaying = false;
           payBtn.disabled = false; 
           payBtn.innerText = "Pay Now";
         }
@@ -222,18 +198,13 @@ async function pay() {
     };
     new Razorpay(options).open();
   } catch(err) { 
-    isPaying = false; // ✅ reset on failure
+    isPaying = false;
     payBtn.disabled = false; 
     payBtn.innerText = "Pay Now"; 
     alert("Payment failed. Try again.");
   }
 }
 load();
-
-// 🟢 STEP 6 — HANDLE PAGE RELOAD SAFELY
-window.addEventListener("beforeunload", () => {
-  isPaying = false;
-});
 </script>
 </body>
 </html>

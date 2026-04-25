@@ -15,7 +15,7 @@ body{
   background:#0f172a;
   color:#e5e7eb;
 
-  /* 🔥 CRITICAL: Prevent bottom bar from cutting off content */
+  /* 🔥 CRITICAL: Fix bottom cut for mobile accessibility */
   padding-bottom:160px;
 }
 
@@ -94,7 +94,6 @@ body{
   cursor:pointer;
   transition:0.2s;
   box-shadow:0 4px 12px rgba(0,0,0,0.2);
-  /* Phase 4: Fixed Card Sizing */
   min-height: 120px;
   display: flex;
   flex-direction: column;
