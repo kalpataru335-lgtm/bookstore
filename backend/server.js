@@ -1,23 +1,19 @@
+import dotenv from "dotenv";
+dotenv.config();
 import express from "express";
 import cors from "cors";
 import Razorpay from "razorpay";
-import fetch from "node-fetch"; // 🔥 PATCH: Essential for Google Sheets communication
+import fetch from "node-fetch";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ================= STORAGE & RAZORPAY ================= */
-
-// Memory storage for immediate admin checks (Resets on server restart)
 const orders = [];
-
 const razorpay = new Razorpay({
-  key_id: "rzp_test_SguP9aeomm5pPh", // 🔁 Replace with LIVE Key for launch
-  key_secret: "Y9bSS39BVhfjsZznrJdeX5Y1"               // 🔁 Replace with your actual Secret Key
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET
 });
-
-/* ================= BOOK DATA ================= */
 
 let books = [
   { id:1, name:"Srila Prabhupada lilamrit (7 Volumes)", price:360, weight:4, status:"available" },
@@ -44,129 +40,85 @@ let books = [
   { id:22, name:"The Laws of Nature", price:20, weight:0.3, status:"available" }
 ];
 
-/* ================= GET ROUTES ================= */
-
-app.get("/books", (req, res) => res.json(books));
-app.get("/orders", (req, res) => res.json(orders));
-app.get("/", (req, res) => res.send("Backend Running ✅"));
-
-/* ================= POST ROUTES ================= */
-
-// 🔥 CONFIRM ORDER: MARK SOLD + GOOGLE SHEETS PERMANENT STORAGE
 app.post("/confirm-order", async (req, res) => {
   const { ids, paymentId, name, phone, address, pincode, amount } = req.body;
+  if (!ids || ids.length === 0) return res.status(400).json({ error: "Invalid order" });
 
-  if (!ids || ids.length === 0) {
-    return res.status(400).json({ error: "Invalid order" });
-  }
+  books = books.map(b => ids.includes(b.id) ? { ...b, status: "sold" } : b);
 
-  // 1. Mark as SOLD in server memory
-  books = books.map(b =>
-    ids.includes(b.id) ? { ...b, status: "sold" } : b
-  );
+  const bookList = books
+    .filter(b => ids.includes(b.id))
+    .map(b => b.name)
+    .join("\n• ");
 
-  // 2. Store in local array for immediate admin view
-  orders.push({ 
-    id: Date.now(), 
-    books: ids, 
-    paymentId, 
-    name, 
-    phone, 
-    address, 
-    pincode, 
-    amount, 
-    time: new Date() 
-  });
+  const receiptText = `
+==============================
+        SOURAV BOOKSTORE
+==============================
+
+Order Receipt
+
+Name: ${name}
+Phone: ${phone}
+Address: ${address}, ${pincode}
+
+------------------------------
+Books:
+• ${bookList}
+
+------------------------------
+Total Paid: ₹${amount}
+
+Payment ID: ${paymentId}
+Order ID: ${paymentId.slice(-6).toUpperCase()}
+Date: ${new Date().toLocaleString()}
+
+Thank you for your purchase 🙏
+This is a system-generated receipt.
+==============================
+`;
+
+  orders.push({ id: Date.now(), books: bookList, paymentId, name, phone, address, pincode, amount, time: new Date() });
 
   try {
-    // 🔸 MAP IDS TO READABLE NAMES FOR THE SHEET
-    const bookNames = ids.map(id => {
-      const b = books.find(x => x.id === id);
-      return b ? b.name : `ID:${id}`;
-    }).join(", ");
-
-    // 3. ✅ SEND TO GOOGLE SHEET (PERMANENT STORAGE)
     const sheetRes = await fetch("https://script.google.com/macros/s/AKfycbysaH5JHd7DIl5t-2zurPEaqOHuxE-E8Af-n5K6pw8PF-rkYDuKdKtVaay_OINg6qFA/exec", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name,
-        phone,
-        address,
-        pincode,
-        books: bookNames,
-        amount,
-        paymentId
-      })
+      body: JSON.stringify({ name, phone, address, pincode, books: bookList, amount, paymentId })
     });
+    if (sheetRes.ok) console.log("✅ Order saved to Google Sheet");
+  } catch (err) { console.error("❌ Google Sheet Error:", err); }
 
-    // ✅ PATCH: VERIFY SUCCESSFUL WRITE
-    if (!sheetRes.ok) {
-        console.error("❌ Google Sheet write failed");
-    } else {
-        console.log("✅ Order saved to Google Sheet");
-    }
-
-  } catch (err) {
-    console.error("❌ Google Sheet Relay Error:", err);
-  }
-
-  res.json({ success: true });
+  res.json({ success: true, receipt: receiptText });
 });
 
-// LOCK INVENTORY
+app.get("/books", (req, res) => res.json(books));
+app.get("/orders", (req, res) => res.json(orders));
+
 app.post("/lock-books", (req, res) => {
   const { ids } = req.body;
   let unavailable = books.filter(b => ids.includes(b.id) && b.status !== "available");
-  
   if (unavailable.length > 0) return res.json({ success: false });
-
-  books = books.map(b => 
-    ids.includes(b.id) ? { ...b, status: "locked", lockedAt: Date.now() } : b
-  );
+  books = books.map(b => ids.includes(b.id) ? { ...b, status: "locked", lockedAt: Date.now() } : b);
   res.json({ success: true });
 });
 
-// UNLOCK INVENTORY (ON FAIL OR CANCEL)
 app.post("/unlock-books", (req, res) => {
   const { ids } = req.body;
-  books = books.map(b => 
-    ids.includes(b.id) && b.status === "locked" ? { ...b, status: "available", lockedAt: null } : b
-  );
+  books = books.map(b => ids.includes(b.id) && b.status === "locked" ? { ...b, status: "available", lockedAt: null } : b);
   res.json({ success: true });
 });
 
-// RAZORPAY ORDER CREATION
 app.post("/create-order", async (req, res) => {
-  const { amount } = req.body;
   try {
-    const order = await razorpay.orders.create({
-      amount: amount * 100, // paise
-      currency: "INR",
-      receipt: "order_" + Date.now()
-    });
+    const order = await razorpay.orders.create({ amount: req.body.amount * 100, currency: "INR", receipt: "order_" + Date.now() });
     res.json(order);
-  } catch (err) {
-    console.error("Order creation failed:", err);
-    res.status(500).json({ error: "Order creation failed" });
-  }
+  } catch (err) { res.status(500).json({ error: "Order creation failed" }); }
 });
-
-/* ================= AUTO UNLOCK (3 MINUTE CLEANER) ================= */
 
 setInterval(() => {
-  books = books.map(b => {
-    if (b.status === "locked" && (Date.now() - b.lockedAt > 180000)) {
-      console.log(`Auto-unlocking: ${b.name}`);
-      return { ...b, status: "available", lockedAt: null };
-    }
-    return b;
-  });
-}, 60000); // Check every minute
-
-/* ================= START SERVER ================= */
+  books = books.map(b => (b.status === "locked" && (Date.now() - b.lockedAt > 180000)) ? { ...b, status: "available", lockedAt: null } : b);
+}, 60000);
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

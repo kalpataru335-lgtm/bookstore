@@ -3,178 +3,70 @@
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Order Successful</title>
-
 <link rel="stylesheet" href="style.css">
 
 <style>
-.container{
-  max-width:600px;
-  margin:auto;
-  padding:16px;
+.container{ max-width:600px; margin:auto; padding:16px; }
+.success{ text-align:center; font-size:22px; margin-bottom:12px; color: #22c55e;}
+.box{ background:#1e293b; padding:14px; border-radius:12px; margin-bottom:10px; }
+pre { 
+    background: #111827; color: #22c55e; padding: 20px; border-radius: 12px; 
+    text-align: left; font-family: monospace; overflow-x: auto; white-space: pre-wrap; 
+    margin: 20px 0; border: 1px solid #1f2937;
 }
-
-.success{
-  text-align:center;
-  font-size:22px;
-  margin-bottom:12px;
-}
-
-.box{
-  background:#1e293b;
-  padding:14px;
-  border-radius:12px;
-  margin-bottom:10px;
-}
-
-.line{
-  display:flex;
-  justify-content:space-between;
-  margin:6px 0;
-}
-
-button{
-  width:100%;
-  padding:14px;
-  border:none;
-  border-radius:10px;
-  margin-top:10px;
-  font-size:15px;
-  cursor:pointer;
-}
-
-.download{
-  background:#3b82f6;
-}
-
-.home{
-  background:#22c55e;
-}
+button{ width:100%; padding:14px; border:none; border-radius:10px; margin-top:10px; font-size:15px; cursor:pointer; }
+.download{ background:#3b82f6; color: white; font-weight: bold; }
+.home{ background:#22c55e; color: white; font-weight: bold; }
 </style>
-
 </head>
 
 <body>
-
 <div class="container">
+    <div class="success">🎉 Order Successful!</div>
+    
+    <div class="box">
+        <p style="text-align: center; color: #9ca3af;">Thank you for your purchase. Your receipt is ready below.</p>
+    </div>
 
-<div class="success">🎉 Order Successful!</div>
+    <pre id="receiptDisplay">Loading receipt...</pre>
 
-<div id="details" class="box"></div>
-
-<div class="box">
-  <div class="line">
-    <span>Total</span>
-    <span>₹<span id="total"></span></span>
-  </div>
-
-  <div class="line">
-    <span>Shipping</span>
-    <span>₹<span id="shipping"></span></span>
-  </div>
-
-  <div class="line" style="font-weight:bold;">
-    <span>Final Paid</span>
-    <span>₹<span id="final"></span></span>
-  </div>
+    <button class="download" onclick="downloadReceipt()">⬇ Download Receipt (TXT)</button>
+    <button class="home" onclick="goHome()">Back to Home</button>
 </div>
-
-<button class="download" onclick="downloadReceipt()">⬇ Download Receipt</button>
-<button class="home" onclick="goHome()">Back to Home</button>
-
-</div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <script>
+const receipt = localStorage.getItem("finalReceipt");
 
-// ===== DATA =====
-let ids = JSON.parse(localStorage.getItem("selectedBooks")) || [];
-let user = JSON.parse(localStorage.getItem("userDetails")) || {};
-let shipping = parseInt(localStorage.getItem("shippingCost")) || 0;
-let bundle = localStorage.getItem("bundleApplied") === "true";
-
-let books = [];
-
-// ===== LOAD =====
-async function load(){
-
-  const res = await fetch("https://bookstore-backend-971c.onrender.com/books");
-  books = await res.json();
-
-  let total = 0;
-  let html = `
-    <b>Name:</b> ${user.name || ""}<br>
-    <b>Phone:</b> ${user.phone || ""}<br>
-    <b>Address:</b> ${user.address || ""}<br><br>
-    <b>Books:</b><br>
-  `;
-
-  ids.forEach(id=>{
-    const b = books.find(x=>x.id === id);
-    if(b){
-      total += b.price;
-      html += `• ${b.name} — ₹${b.price}<br>`;
-    }
-  });
-
-  // APPLY BUNDLE
-  if(bundle){
-    total -= 100;
-  }
-
-  let final = total + shipping;
-
-  document.getElementById("details").innerHTML = html;
-  document.getElementById("total").innerText = total;
-  document.getElementById("shipping").innerText = shipping;
-  document.getElementById("final").innerText = final;
+if (receipt) {
+    document.getElementById("receiptDisplay").innerText = receipt;
+} else {
+    document.getElementById("receiptDisplay").innerText = "No receipt found. Please check your email/messages.";
 }
 
-// ===== PDF DOWNLOAD =====
 function downloadReceipt(){
+    if (!receipt) return alert("No receipt found to download.");
 
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-
-  let y = 10;
-
-  doc.text("Order Receipt", 10, y); y+=10;
-
-  doc.text(`Name: ${user.name}`, 10, y); y+=8;
-  doc.text(`Phone: ${user.phone}`, 10, y); y+=8;
-  doc.text(`Address: ${user.address}`, 10, y); y+=10;
-
-  doc.text("Books:", 10, y); y+=8;
-
-  ids.forEach(id=>{
-    const b = books.find(x=>x.id === id);
-    if(b){
-      doc.text(`${b.name} - ₹${b.price}`, 10, y);
-      y+=6;
-    }
-  });
-
-  let total = parseInt(document.getElementById("total").innerText);
-  let final = parseInt(document.getElementById("final").innerText);
-
-  y+=6;
-  doc.text(`Shipping: ₹${shipping}`, 10, y); y+=8;
-  doc.text(`Total: ₹${total}`, 10, y); y+=8;
-  doc.text(`Final Paid: ₹${final}`, 10, y);
-
-  doc.save("receipt.pdf");
+    const blob = new Blob([receipt], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "Sourav_Bookstore_Receipt.txt";
+    
+    document.body.appendChild(link);
+    link.click();
+    
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 }
 
-// ===== HOME =====
 function goHome(){
-  localStorage.clear();
-  window.location.href = "index.html";
+    localStorage.removeItem("selectedBooks");
+    localStorage.removeItem("shippingCost");
+    localStorage.removeItem("bundleApplied");
+    localStorage.removeItem("finalReceipt");
+    window.location.href = "index.html";
 }
-
-// ===== INIT =====
-load();
-
 </script>
-
 </body>
 </html>

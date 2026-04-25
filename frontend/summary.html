@@ -12,7 +12,6 @@
   .line { display: flex; justify-content: space-between; margin: 10px 0; }
   .final-line { color: #22c55e; font-size: 20px; font-weight: bold; }
   
-  /* Layout Patch: Ensuring breathing room above the fixed bottom bar */
   .terms-card {
     margin: 30px auto 180px auto;
     max-width: 600px;
@@ -25,7 +24,6 @@
 </head>
 
 <body>
-
 <h2 style="text-align:center; margin: 20px 0;">🧾 Order Summary</h2>
 
 <div class="container">
@@ -80,17 +78,12 @@ let books = [];
 let calculatedTotal = 0;
 
 async function load() {
-  if(!localStorage.getItem("shippingCost")) { 
-    alert("Please calculate shipping before proceeding"); 
-    window.location.href = "details.html"; 
-    return; 
-  }
+  if(!localStorage.getItem("shippingCost")) { alert("Calculate shipping first"); window.location.href = "details.html"; return; }
   try {
     const res = await fetch("https://bookstore-backend-971c.onrender.com/books", { cache: "no-store" });
     books = await res.json();
     let total=0, mrp=0, html="", rawTotal=0, unavailable = [];
 
-    // Filter available vs sold books
     ids.forEach(id => {
       const b = books.find(x => x.id === id);
       if(b && b.status === "available") { 
@@ -101,26 +94,17 @@ async function load() {
       }
     });
 
-    ids = ids.filter(id => { 
-      const b = books.find(x => x.id === id); 
-      return b && b.status === "available"; 
-    });
+    ids = ids.filter(id => { const b = books.find(x => x.id === id); return b && b.status === "available"; });
     localStorage.setItem("selectedBooks", JSON.stringify(ids));
 
-    if(ids.length === 0) { 
-      alert("All selected books are unavailable"); 
-      window.location.href = "index.html"; 
-      return; 
-    }
+    if(ids.length === 0) { alert("All selected books are unavailable"); window.location.href = "index.html"; return; }
 
-    // Bundle Logic
     const availableCount = books.filter(b => b.status === "available").length;
     const isBundle = ids.length === availableCount && availableCount > 0;
     let bundleDiscount = isBundle ? 100 : 0;
     
     calculatedTotal = total + shipping - bundleDiscount;
 
-    // Update UI
     document.getElementById("list").innerHTML = html;
     document.getElementById("unavailableBox").style.display = unavailable.length > 0 ? "block" : "none";
     document.getElementById("unavailableList").innerHTML = unavailable.map(x => `<p>${x}</p>`).join("");
@@ -133,16 +117,10 @@ async function load() {
   } catch(err) { alert("Failed to load summary."); }
 }
 
-function modify() { 
-  localStorage.setItem("bundleApplied","false"); 
-  localStorage.removeItem("shippingCost"); 
-  window.location = "index.html"; 
-}
+function modify() { localStorage.setItem("bundleApplied","false"); localStorage.removeItem("shippingCost"); window.location = "index.html"; }
 
 async function pay() {
   const payBtn = document.getElementById("payBtn");
-
-  // Prevent multiple clicks
   if(window.paymentStarted) return;
   window.paymentStarted = true;
 
@@ -153,7 +131,6 @@ async function pay() {
   payBtn.innerText = "Processing...";
 
   try {
-    // 1. Fresh inventory check
     const checkRes = await fetch("https://bookstore-backend-971c.onrender.com/books", { cache: "no-store" });
     const latest = await checkRes.json();
     let removed = [];
@@ -170,46 +147,38 @@ async function pay() {
       return;
     }
 
-    // 2. Lock Inventory
     const lockRes = await fetch("https://bookstore-backend-971c.onrender.com/lock-books", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: ids })
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: ids })
     });
     if(!lockRes.ok) throw new Error("Lock failed");
 
-    // 3. Create Razorpay Order
     const response = await fetch("https://bookstore-backend-971c.onrender.com/create-order", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amount: calculatedTotal })
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount: calculatedTotal })
     });
     const data = await response.json();
 
     const rzp = new Razorpay({
-      key: "rzp_test_SguP9aeomm5pPh", // Replace with Live Key for production
+      key: "rzp_test_ShQgwiuuoAGYfq", // Replace with Live Key
       amount: data.amount,
       currency: "INR",
       order_id: data.id,
       handler: async function (response) {
         const user = JSON.parse(localStorage.getItem("userDetails") || "{}");
         try {
-          // Final Confirmation (Server Marks Sold + Relays to Google Sheets)
           const confirmRes = await fetch("https://bookstore-backend-971c.onrender.com/confirm-order", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
+            method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              ids: ids,
-              paymentId: response.razorpay_payment_id,
-              amount: calculatedTotal,
-              name: user.name,
-              phone: user.phone,
-              address: user.address,
-              pincode: user.pincode
+              ids: ids, paymentId: response.razorpay_payment_id, amount: calculatedTotal,
+              name: user.name, phone: user.phone, address: user.address, pincode: user.pincode
             })
           });
+          
+          const confirmData = await confirmRes.json();
           if(!confirmRes.ok) throw new Error("Confirmation failed");
+          
+          localStorage.setItem("finalReceipt", confirmData.receipt);
           window.location.href = "thankyou.html";
+
         } catch (err) {
           alert("Payment done but record failed. Save Payment ID: " + response.razorpay_payment_id);
           window.paymentStarted = false;
@@ -219,7 +188,6 @@ async function pay() {
         ondismiss: async function() {
           window.paymentStarted = false;
           payBtn.disabled = false; payBtn.innerText = "Pay Now";
-          // Unlock books if payment cancelled
           await fetch("https://bookstore-backend-971c.onrender.com/unlock-books", { 
             method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ ids: ids }) 
           });
