@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import dotenv from "dotenv";
 dotenv.config();
 import express from "express";
@@ -5,10 +6,11 @@ import cors from "cors";
 import Razorpay from "razorpay";
 import fetch from "node-fetch";
 
-// 🟢 HYBRID CACHE
+// 🟢 HYBRID CACHE & FAIL-SAFE QUEUE
 let booksCache = [];
 let lastFetchTime = 0;
 const CACHE_TTL = 10000; // 10 seconds
+let pendingSheetFailures = []; // Phase 4: Dead letter queue for failed sheet updates
 
 async function fetchBooksFromSheet() {
   try {
@@ -24,7 +26,8 @@ async function fetchBooksFromSheet() {
   }
 }
 
-async function safeSheetUpdate(payload, retries = 2) {
+// Phase 4: Improved with tracking and auto-queueing
+async function safeSheetUpdate(payload, retries = 3) {
   for (let i = 0; i <= retries; i++) {
     try {
       const res = await fetch(SHEET_API, {
@@ -46,11 +49,12 @@ async function safeSheetUpdate(payload, retries = 2) {
       console.log(`❌ Sheet attempt ${i + 1} failed:`, err.message);
 
       if (i === retries) {
-        console.log("🚨 FINAL FAILURE: Sheet update failed");
+        console.log("🚨 FINAL FAILURE: Saving for retry later");
+        pendingSheetFailures.push(payload);
         return false;
       }
 
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise(r => setTimeout(r, 700));
     }
   }
 }
@@ -60,11 +64,23 @@ function processLocks(data) {
   return data.map(b => {
     if (b.status === "locked" && b.lockedAt) {
       if (now - b.lockedAt > 180000) {
-        return { ...b, status: "available", lockedAt: "" };
+        return { ...b, status: "available", lockedAt: "", lockedBy: "" };
       }
     }
     return b;
   });
+}
+
+// Phase 1: Payment Verification Function
+function verifyPayment({ order_id, payment_id, signature }) {
+  const body = order_id + "|" + payment_id;
+
+  const expectedSignature = crypto
+    .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+    .update(body.toString())
+    .digest("hex");
+
+  return expectedSignature === signature;
 }
 
 const app = express();
@@ -80,13 +96,29 @@ const razorpay = new Razorpay({
 
 app.post("/create-order", async (req, res) => {
   try {
-    const { amount } = req.body;
+    const { amount, ids } = req.body; // amount is passed from frontend, but we override it
+
+    // Phase 2: Recalculate amount from cache (source of truth)
+    let calculatedTotal = 0;
+
+    ids.forEach(id => {
+      const b = booksCache.find(x => Number(x.id) === Number(id));
+      if (b) calculatedTotal += Number(b.price);
+    });
+
+    if (calculatedTotal <= 0) {
+      return res.status(400).json({ error: "Invalid amount" });
+    }
+
     const order = await razorpay.orders.create({
-      amount: Math.round(amount * 100),
+      amount: Math.round(calculatedTotal * 100),
       currency: "INR",
       receipt: "rcpt_" + Date.now()
     });
-    res.json(order);
+
+    // Attach server-calculated amount back to client
+    res.json({ ...order, calculatedAmount: calculatedTotal });
+
   } catch (err) {
     console.log("ORDER ERROR:", err);
     res.status(500).json({ error: "Order failed" });
@@ -94,19 +126,68 @@ app.post("/create-order", async (req, res) => {
 });
 
 app.post("/confirm-order", async (req, res) => {
-  const { ids, paymentId, name, phone, address, pincode } = req.body;
-  if (!ids || ids.length === 0) return res.status(400).json({ error: "Invalid order" });
+  const { ids, paymentId, orderId, signature, name, phone, address, pincode, sessionId } = req.body;
 
-  // 🟢 FIX 1: TYPE MISMATCH CHECK
+  // Phase 7: Extra Safety Check
+  if (!paymentId || !orderId || !signature) {
+    return res.status(400).json({ error: "Incomplete payment data" });
+  }
+
+  if (!ids || ids.length === 0) {
+    return res.status(400).json({ error: "Invalid order" });
+  }
+
+  // Phase 7: Ensure books still exist in cache
+  const missing = ids.filter(id =>
+    !booksCache.find(b => Number(b.id) === Number(id))
+  );
+
+  if (missing.length > 0) {
+    return res.status(400).json({ error: "Some books not found" });
+  }
+
+  // Phase 1: Verify Payment Signature
+  const isValid = verifyPayment({
+    order_id: orderId,
+    payment_id: paymentId,
+    signature
+  });
+
+  if (!isValid) {
+    return res.status(400).json({ error: "Payment verification failed" });
+  }
+
+  // Phase 2: Verify Amount Matches Order
+  try {
+    const razorpayOrder = await razorpay.orders.fetch(orderId);
+
+    let backendTotal = 0;
+    ids.forEach(id => {
+      const b = booksCache.find(x => Number(x.id) === Number(id));
+      if (b) backendTotal += Number(b.price);
+    });
+
+    const expectedAmount = Math.round(backendTotal * 100);
+
+    if (razorpayOrder.amount !== expectedAmount) {
+      return res.status(400).json({ error: "Amount mismatch detected" });
+    }
+
+  } catch (err) {
+    console.log("Amount verification failed:", err.message);
+    return res.status(400).json({ error: "Payment validation failed" });
+  }
+
+  // Phase 3: Validate Lock Ownership
   const invalid = booksCache.filter(b =>
-    ids.map(Number).includes(Number(b.id)) && b.status !== "locked"
+    ids.map(Number).includes(Number(b.id)) &&
+    (b.status !== "locked" || b.lockedBy !== sessionId)
   );
 
   if (invalid.length > 0) {
-    return res.status(400).json({ error: "Some books are no longer available" });
+    return res.status(400).json({ error: "Books locked by another user or expired" });
   }
 
-  // 🟢 FIX 2: USE CACHE (No extra sheet fetch)
   const currentBooks = booksCache;
 
   let total = 0;
@@ -117,16 +198,20 @@ app.post("/confirm-order", async (req, res) => {
 
   const amount = total; 
 
-  // Update Sold status in Cache instantly
+  // Phase 3: Update Sold status in Cache instantly and clear lock ownership
   booksCache = booksCache.map(b =>
     ids.map(Number).includes(Number(b.id))
-      ? { ...b, status: "sold", lockedAt: "" }
+      ? { ...b, status: "sold", lockedAt: "", lockedBy: "" }
       : b
   );
 
   // Update Sheet2 (Inventory)
-  const updates = ids.map(id => ({ id, status: "sold", lockedAt: "" }));
-  await safeSheetUpdate({ type: "updateBooks", updates });
+  const updates = ids.map(id => ({ id, status: "sold", lockedAt: "", lockedBy: "" }));
+  const sheetOk = await safeSheetUpdate({ type: "updateBooks", updates });
+
+  if (!sheetOk) {
+    console.log("⚠️ Warning: Sheet not updated, but cache is updated (queued for retry)");
+  }
 
   const bookList = currentBooks.filter(b => ids.map(Number).includes(Number(b.id))).map(b => b.name).join("\n• ");
 
@@ -160,7 +245,6 @@ Thank you for your purchase!
 ====================================
 `;
 
-  // 🟢 FIX 2: SHEET1 UPDATE (Explicit "order" type)
   const saved = await safeSheetUpdate({
     type: "order", 
     name,
@@ -172,7 +256,7 @@ Thank you for your purchase!
     paymentId
   });
 
-  if (!saved) console.log("⚠️ Order log to Sheet1 failed");
+  if (!saved) console.log("⚠️ Order log to Sheet1 failed but queued for retry");
 
   res.json({ success: true, receipt: receiptText });
 });
@@ -191,7 +275,8 @@ app.get("/books", async (req, res) => {
 });
 
 app.post("/lock-books", async (req, res) => {
-  const { ids } = req.body;
+  const { ids, sessionId } = req.body;
+  
   const invalid = booksCache.filter(b =>
     ids.map(Number).includes(Number(b.id)) && b.status !== "available"
   );
@@ -200,18 +285,18 @@ app.post("/lock-books", async (req, res) => {
     return res.json({ success: false, message: "Books unavailable" });
   }
 
-  // 🟢 FIX 3: CONSISTENT TIMESTAMP
   const now = Date.now();
 
+  // Phase 3: Store Session ID in lock
   booksCache = booksCache.map(b =>
     ids.map(Number).includes(Number(b.id))
-      ? { ...b, status: "locked", lockedAt: now }
+      ? { ...b, status: "locked", lockedAt: now, lockedBy: sessionId }
       : b
   );
 
   safeSheetUpdate({
     type: "updateBooks",
-    updates: ids.map(id => ({ id, status: "locked", lockedAt: now }))
+    updates: ids.map(id => ({ id, status: "locked", lockedAt: now, lockedBy: sessionId }))
   });
 
   res.json({ success: true });
@@ -222,13 +307,13 @@ app.post("/unlock-books", async (req, res) => {
 
   booksCache = booksCache.map(b =>
     ids.map(Number).includes(Number(b.id))
-      ? { ...b, status: "available", lockedAt: "" }
+      ? { ...b, status: "available", lockedAt: "", lockedBy: "" }
       : b
   );
 
   safeSheetUpdate({
     type: "updateBooks",
-    updates: ids.map(id => ({ id, status: "available", lockedAt: "" }))
+    updates: ids.map(id => ({ id, status: "available", lockedAt: "", lockedBy: "" }))
   });
 
   res.json({ success: true });
@@ -246,12 +331,30 @@ async function syncExpiredLocks() {
 
   await safeSheetUpdate({
     type: "updateBooks",
-    updates: expired.map(b => ({ id: b.id, status: "available", lockedAt: "" }))
+    updates: expired.map(b => ({ id: b.id, status: "available", lockedAt: "", lockedBy: "" }))
   });
 }
 
+// 15-second loop: Fetch fresh data and clear expired locks
 setInterval(async () => {
   await fetchBooksFromSheet();
   booksCache = processLocks(booksCache);
   await syncExpiredLocks();
+}, 15000);
+
+// Phase 4: Background loop to retry failed sheet updates
+setInterval(async () => {
+  if (pendingSheetFailures.length === 0) return;
+
+  console.log("🔄 Retrying failed sheet updates...");
+
+  const retryQueue = [...pendingSheetFailures];
+  pendingSheetFailures = [];
+
+  for (const payload of retryQueue) {
+    const success = await safeSheetUpdate(payload, 1);
+    if (!success) {
+      pendingSheetFailures.push(payload);
+    }
+  }
 }, 15000);

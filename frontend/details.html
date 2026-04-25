@@ -96,6 +96,13 @@ Calculate Shipping
 
 </div>
 
+<footer style="margin-top:40px; padding:15px; text-align:center; font-size:13px; color:#888; padding-bottom: 120px;">
+  <a href="terms.html" target="_blank" style="color:#888; text-decoration:none;">Terms</a> |
+  <a href="privacy.html" target="_blank" style="color:#888; text-decoration:none;">Privacy</a> |
+  <a href="refund.html" target="_blank" style="color:#888; text-decoration:none;">Refund</a> |
+  <a href="cancellation.html" target="_blank" style="color:#888; text-decoration:none;">Cancellation</a>
+</footer>
+
 <div class="bottom-bar">
   <button id="continueBtn" class="continue-btn" disabled onclick="goNext()">
     Continue →
@@ -124,7 +131,8 @@ function saveDetails() {
   localStorage.setItem("userDetails", JSON.stringify(data));
 }
 
-window.onload = () => {
+// 🟩 PHASE 7: FAST FORM LOAD (Replaces window.onload)
+window.addEventListener("DOMContentLoaded", () => {
   const saved = JSON.parse(localStorage.getItem("userDetails") || "{}");
 
   document.getElementById("name").value = saved.name || "";
@@ -133,12 +141,11 @@ window.onload = () => {
   document.getElementById("pincode").value = saved.pincode || "";
   
   load();
-};
+});
 
 // ===== LOAD INITIAL DATA =====
 async function load(){
   try{
-    // 🟢 PHASE 7A FIX: Use Cache instead of mandatory API fetch
     const cached = localStorage.getItem("booksCache");
     
     if (cached) {
@@ -151,7 +158,6 @@ async function load(){
 
     let weight = 0;
     selected.forEach(id=>{
-      // 🔒 CRITICAL FIX: Strict Type matching
       const b = books.find(x=> Number(x.id) === Number(id));
       if(b) weight += b.weight;
     });
@@ -273,12 +279,10 @@ async function goNext(){
 
   localStorage.setItem("userDetails", JSON.stringify(user));
 
-  // 🟢 PHASE 7A FIX: Use already loaded 'books' array to avoid redundant fetch
   const latest = books;
 
   let removed = [];
   selected = selected.filter(id=>{
-    // 🔒 CRITICAL FIX: Strict Type matching
     const b = latest.find(x=> Number(x.id) === Number(id));
     if(!b || b.status !== "available"){ 
       removed.push(b?.name || "Book"); 

@@ -4,6 +4,14 @@ selected = selected.map(Number);
 let booksData = [];
 const CACHE_KEY = "booksCache";
 
+// 🟧 PHASE 3 — CREATE SESSION ID
+let sessionId = localStorage.getItem("sessionId");
+
+if (!sessionId) {
+  sessionId = "sess_" + Date.now() + "_" + Math.random().toString(36).slice(2);
+  localStorage.setItem("sessionId", sessionId);
+}
+
 // 🟢 FIX 2: INTERACTION GUARD
 let isInteracting = false;
 document.addEventListener("click", () => {
@@ -58,10 +66,10 @@ async function refreshBooks() {
     const oldStr = JSON.stringify(booksData);
     const latestStr = JSON.stringify(newData);
 
-    // 🟢 FIX 1 & 2: Only refresh if data changed AND user isn't clicking
+    // Only refresh if data changed AND user isn't clicking
     if (!isInteracting && oldStr !== latestStr) {
       
-      // 🟢 Keep selection synced with new inventory data
+      // Keep selection synced with new inventory data
       selected = selected.filter(id => {
         const b = newData.find(x => Number(x.id) === Number(id));
         return b && b.status === "available";
@@ -190,7 +198,11 @@ setInterval(() => {
       el.innerText = `⏳ LOCKED (${t - 1}s)`;
     } else {
       el.innerText = "⏳ Release pending...";
-      if (t === 0) loadBooks(); 
+      
+      // 🟩 PHASE 7: HARD REFRESH AFTER LOCK EXPIRE
+      if (t === 0) {
+        setTimeout(() => loadBooks(), 500); 
+      }
     }
   });
 }, 1000);
