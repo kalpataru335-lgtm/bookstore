@@ -40,98 +40,74 @@ let books = [
   { id:22, name:"The Laws of Nature", price:20, weight:0.3, status:"available" }
 ];
 
+app.post("/create-order", async (req, res) => {
+  try {
+    const { amount } = req.body;
+    const order = await razorpay.orders.create({
+      amount: Math.round(amount * 100), 
+      currency: "INR",
+      receipt: "rcpt_" + Date.now()
+    });
+    res.json(order);
+  } catch (err) {
+    console.log("ORDER ERROR:", err);
+    res.status(500).json({ error: "Order failed" });
+  }
+});
+
 app.post("/confirm-order", async (req, res) => {
   const { ids, paymentId, name, phone, address, pincode, amount } = req.body;
   if (!ids || ids.length === 0) return res.status(400).json({ error: "Invalid order" });
 
   books = books.map(b => ids.includes(b.id) ? { ...b, status: "sold" } : b);
-
-  const bookList = books
-    .filter(b => ids.includes(b.id))
-    .map(b => b.name)
-    .join("\n• ");
+  const bookList = books.filter(b => ids.includes(b.id)).map(b => b.name).join("\n• ");
 
   const receiptText = `
 ==============================
         SOURAV BOOKSTORE
 ==============================
-
 Order Receipt
-
 Name: ${name}
 Phone: ${phone}
 Address: ${address}, ${pincode}
-
 ------------------------------
 Books:
 • ${bookList}
-
 ------------------------------
 Total Paid: ₹${amount}
-
 Payment ID: ${paymentId}
-Order ID: ${paymentId.slice(-6).toUpperCase()}
 Date: ${new Date().toLocaleString()}
-
 Thank you for your purchase 🙏
-This is a system-generated receipt.
 ==============================
 `;
 
   orders.push({ id: Date.now(), books: bookList, paymentId, name, phone, address, pincode, amount, time: new Date() });
 
   let sheetSuccess = false;
-
   try {
-    console.log("📡 Sending data to Google Sheet...");
     const sheetRes = await fetch("https://script.google.com/macros/s/AKfycbysaH5JHd7DIl5t-2zurPEaqOHuxE-E8Af-n5K6pw8PF-rkYDuKdKtVaay_OINg6qFA/exec", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, phone, address, pincode, books: bookList, amount, paymentId })
     });
-
     const text = await sheetRes.text();
-
-    console.log("📊 Sheet Status:", sheetRes.status);
+    if (sheetRes.ok) sheetSuccess = true;
     console.log("📊 Sheet Response:", text);
-
-    if (sheetRes.ok) {
-      sheetSuccess = true;
-    }
-
-  } catch (err) {
-    console.log("❌ Sheet Error:", err.message);
-  }
-
-  if (!sheetSuccess) {
-    console.log("⚠️ WARNING: Order not saved to sheet!");
-  }
+  } catch (err) { console.log("❌ Sheet Error:", err.message); }
 
   res.json({ success: true, receipt: receiptText });
 });
 
 app.get("/books", (req, res) => res.json(books));
-app.get("/orders", (req, res) => res.json(orders));
-
 app.post("/lock-books", (req, res) => {
   const { ids } = req.body;
-  let unavailable = books.filter(b => ids.includes(b.id) && b.status !== "available");
-  if (unavailable.length > 0) return res.json({ success: false });
   books = books.map(b => ids.includes(b.id) ? { ...b, status: "locked", lockedAt: Date.now() } : b);
   res.json({ success: true });
 });
-
 app.post("/unlock-books", (req, res) => {
   const { ids } = req.body;
   books = books.map(b => ids.includes(b.id) && b.status === "locked" ? { ...b, status: "available", lockedAt: null } : b);
   res.json({ success: true });
-});
-
-app.post("/create-order", async (req, res) => {
-  try {
-    const order = await razorpay.orders.create({ amount: req.body.amount * 100, currency: "INR", receipt: "order_" + Date.now() });
-    res.json(order);
-  } catch (err) { res.status(500).json({ error: "Order creation failed" }); }
 });
 
 setInterval(() => {
