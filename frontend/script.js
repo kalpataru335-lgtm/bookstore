@@ -1,17 +1,21 @@
 const API = "https://bookstore-backend-971c.onrender.com";
 let selected = JSON.parse(localStorage.getItem("selectedBooks")) || [];
-// Enforce numeric types from storage
 selected = selected.map(Number);
 let booksData = [];
 const CACHE_KEY = "booksCache";
 
-// Clear any stale bundle state on load
+// 🟢 FIX 2: INTERACTION GUARD
+let isInteracting = false;
+document.addEventListener("click", () => {
+  isInteracting = true;
+  setTimeout(() => (isInteracting = false), 2000); // 2-second buffer after interaction
+});
+
 localStorage.setItem("bundleApplied", "false");
 
 async function loadBooks() {
   const container = document.getElementById("books");
 
-  // 🟢 PHASE 7A FIX: Load from local cache with 15s expiry check
   const cached = localStorage.getItem(CACHE_KEY);
   if (cached) {
     const parsed = JSON.parse(cached);
@@ -26,15 +30,12 @@ async function loadBooks() {
     const data = await res.json();
     booksData = data;
     
-    // Auto-clean selection: Remove items that were sold/locked by others
     selected = selected.filter(id => {
-      // 🔒 CRITICAL FIX: Strict Type matching
       const b = data.find(x => Number(x.id) === Number(id));
       return b && b.status === "available";
     });
     localStorage.setItem("selectedBooks", JSON.stringify(selected));
 
-    // 🟢 Save to cache with timestamp
     localStorage.setItem(CACHE_KEY, JSON.stringify({
       data: data,
       time: Date.now()
@@ -48,14 +49,48 @@ async function loadBooks() {
   }
 }
 
+// 🟢 SMART REFRESH (With Selection Sync & Interaction Guard)
+async function refreshBooks() {
+  try {
+    const res = await fetch(API + "/books", { cache: "no-store" });
+    const newData = await res.json();
+
+    const oldStr = JSON.stringify(booksData);
+    const latestStr = JSON.stringify(newData);
+
+    // 🟢 FIX 1 & 2: Only refresh if data changed AND user isn't clicking
+    if (!isInteracting && oldStr !== latestStr) {
+      
+      // 🟢 Keep selection synced with new inventory data
+      selected = selected.filter(id => {
+        const b = newData.find(x => Number(x.id) === Number(id));
+        return b && b.status === "available";
+      });
+      localStorage.setItem("selectedBooks", JSON.stringify(selected));
+
+      booksData = newData;
+
+      localStorage.setItem(CACHE_KEY, JSON.stringify({
+        data: newData,
+        time: Date.now()
+      }));
+
+      renderBooks(newData);
+      console.log("🔄 Inventory & Selection synced");
+    }
+
+  } catch (err) {
+    console.log("Refresh failed:", err.message);
+  }
+}
+
 function renderBooks(books) {
   const container = document.getElementById("books");
   container.innerHTML = "";
   
   books.forEach(b => {
     const card = document.createElement("div");
-    
-    const mrp = b.price * 4; // Phase 4 UI logic
+    const mrp = b.price * 4; 
 
     let highlight = "";
     if (b.name.toLowerCase().includes("lilamrit")) {
@@ -117,7 +152,6 @@ function updateTotal() {
   let total = 0;
 
   selected.forEach(id => {
-    // 🔒 CRITICAL FIX: Strict Type matching
     const b = booksData.find(x => Number(x.id) === Number(id));
     if (b) rawTotal += Number(b.price);
   });
@@ -126,9 +160,7 @@ function updateTotal() {
   const availableCount = booksData.filter(b => b.status === "available").length;
   const isBundle = selected.length === availableCount && availableCount > 0;
 
-  if (isBundle) {
-    total -= 100; // Bundle discount
-  }
+  if (isBundle) total -= 100; 
 
   document.getElementById("total").innerText = total;
   const msg = document.getElementById("msg");
@@ -145,11 +177,9 @@ function updateTotal() {
 }
 
 function goNext() {
-  // 🟢 PHASE 7A FIX: Removed redundant checks for faster navigation
   window.location.href = "details.html";
 }
 
-// Live Countdown Interval
 setInterval(() => {
   document.querySelectorAll(".locked small").forEach(el => {
     let match = el.innerText.match(/(\d+)s/);
@@ -165,5 +195,9 @@ setInterval(() => {
   });
 }, 1000);
 
-// Initialize
 loadBooks();
+
+// 🟢 Auto refresh every 10 sec
+setInterval(() => {
+  refreshBooks();
+}, 10000);
