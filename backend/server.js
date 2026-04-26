@@ -10,7 +10,7 @@ import fetch from "node-fetch";
 let booksCache = [];
 let lastFetchTime = 0;
 const CACHE_TTL = 10000; // 10 seconds
-let pendingSheetFailures = []; // Phase 4: Dead letter queue for failed sheet updates
+let pendingSheetFailures = []; 
 
 async function fetchBooksFromSheet() {
   try {
@@ -26,7 +26,6 @@ async function fetchBooksFromSheet() {
   }
 }
 
-// Phase 4: Improved with tracking and auto-queueing
 async function safeSheetUpdate(payload, retries = 3) {
   for (let i = 0; i <= retries; i++) {
     try {
@@ -71,7 +70,6 @@ function processLocks(data) {
   });
 }
 
-// Phase 1: Payment Verification Function
 function verifyPayment({ order_id, payment_id, signature }) {
   const body = order_id + "|" + payment_id;
 
@@ -96,17 +94,18 @@ const razorpay = new Razorpay({
 
 app.post("/create-order", async (req, res) => {
   try {
-    const { amount, ids } = req.body; // amount is passed from frontend, but we override it
+    const { ids, shipping = 0, discount = 0 } = req.body;
 
-    // Phase 2: Recalculate amount from cache (source of truth)
-    let calculatedTotal = 0;
+    let booksTotal = 0;
 
     ids.forEach(id => {
       const b = booksCache.find(x => Number(x.id) === Number(id));
-      if (b) calculatedTotal += Number(b.price);
+      if (b) booksTotal += Number(b.price);
     });
 
-    if (calculatedTotal <= 0) {
+    let calculatedTotal = booksTotal + Number(shipping) - Number(discount);
+
+    if (calculatedTotal < 1) {
       return res.status(400).json({ error: "Invalid amount" });
     }
 
@@ -116,7 +115,6 @@ app.post("/create-order", async (req, res) => {
       receipt: "rcpt_" + Date.now()
     });
 
-    // Attach server-calculated amount back to client
     res.json({ ...order, calculatedAmount: calculatedTotal });
 
   } catch (err) {
@@ -126,9 +124,8 @@ app.post("/create-order", async (req, res) => {
 });
 
 app.post("/confirm-order", async (req, res) => {
-  const { ids, paymentId, orderId, signature, name, phone, address, pincode, sessionId } = req.body;
+  const { ids, paymentId, orderId, signature, name, phone, address, pincode, sessionId, shipping = 0, discount = 0 } = req.body;
 
-  // Phase 7: Extra Safety Check
   if (!paymentId || !orderId || !signature) {
     return res.status(400).json({ error: "Incomplete payment data" });
   }
@@ -137,7 +134,6 @@ app.post("/confirm-order", async (req, res) => {
     return res.status(400).json({ error: "Invalid order" });
   }
 
-  // Phase 7: Ensure books still exist in cache
   const missing = ids.filter(id =>
     !booksCache.find(b => Number(b.id) === Number(id))
   );
@@ -146,7 +142,6 @@ app.post("/confirm-order", async (req, res) => {
     return res.status(400).json({ error: "Some books not found" });
   }
 
-  // Phase 1: Verify Payment Signature
   const isValid = verifyPayment({
     order_id: orderId,
     payment_id: paymentId,
@@ -157,7 +152,6 @@ app.post("/confirm-order", async (req, res) => {
     return res.status(400).json({ error: "Payment verification failed" });
   }
 
-  // Phase 2: Verify Amount Matches Order
   try {
     const razorpayOrder = await razorpay.orders.fetch(orderId);
 
@@ -167,7 +161,7 @@ app.post("/confirm-order", async (req, res) => {
       if (b) backendTotal += Number(b.price);
     });
 
-    const expectedAmount = Math.round(backendTotal * 100);
+    const expectedAmount = Math.round((backendTotal + Number(shipping) - Number(discount)) * 100);
 
     if (razorpayOrder.amount !== expectedAmount) {
       return res.status(400).json({ error: "Amount mismatch detected" });
@@ -178,7 +172,6 @@ app.post("/confirm-order", async (req, res) => {
     return res.status(400).json({ error: "Payment validation failed" });
   }
 
-  // Phase 3: Validate Lock Ownership
   const invalid = booksCache.filter(b =>
     ids.map(Number).includes(Number(b.id)) &&
     (b.status !== "locked" || b.lockedBy !== sessionId)
@@ -190,22 +183,20 @@ app.post("/confirm-order", async (req, res) => {
 
   const currentBooks = booksCache;
 
-  let total = 0;
+  let booksTotal = 0;
   ids.forEach(id => {
     const b = currentBooks.find(x => Number(x.id) === Number(id));
-    if (b) total += Number(b.price);
+    if (b) booksTotal += Number(b.price);
   });
 
-  const amount = total; 
+  const amount = booksTotal + Number(shipping) - Number(discount); 
 
-  // Phase 3: Update Sold status in Cache instantly and clear lock ownership
   booksCache = booksCache.map(b =>
     ids.map(Number).includes(Number(b.id))
       ? { ...b, status: "sold", lockedAt: "", lockedBy: "" }
       : b
   );
 
-  // Update Sheet2 (Inventory)
   const updates = ids.map(id => ({ id, status: "sold", lockedAt: "", lockedBy: "" }));
   const sheetOk = await safeSheetUpdate({ type: "updateBooks", updates });
 
@@ -287,7 +278,6 @@ app.post("/lock-books", async (req, res) => {
 
   const now = Date.now();
 
-  // Phase 3: Store Session ID in lock
   booksCache = booksCache.map(b =>
     ids.map(Number).includes(Number(b.id))
       ? { ...b, status: "locked", lockedAt: now, lockedBy: sessionId }
@@ -335,14 +325,12 @@ async function syncExpiredLocks() {
   });
 }
 
-// 15-second loop: Fetch fresh data and clear expired locks
 setInterval(async () => {
   await fetchBooksFromSheet();
   booksCache = processLocks(booksCache);
   await syncExpiredLocks();
 }, 15000);
 
-// Phase 4: Background loop to retry failed sheet updates
 setInterval(async () => {
   if (pendingSheetFailures.length === 0) return;
 
